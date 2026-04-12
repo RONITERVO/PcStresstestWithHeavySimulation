@@ -1,0 +1,36 @@
+Garage Heat & Show Plan (RTX 5070 + Ryzen 9 7950X)
+=================================================
+
+Objective
+---------
+Run a living, ever-evolving bio simulation at 1920x1080 that maxes GPU + CPU, turning the research garage into a controllable heat chamber while projecting mesmerizing emergent lifeforms.
+
+Strategy Summary
+----------------
+1. **GPU-bound Gray-Scott / Lenia Hybrid**
+	- Ping-pong framebuffers at 1920x1080 with multiple simulation substeps per frame.
+	- Heavy kernel convolutions + nonlinear reaction-diffusion with compute-like fragment shaders.
+	- Parameter drift + color LUTs for "living lab" aesthetics.
+
+2. **CPU Saturation Threads**
+	- Background NumPy-heavy matrix multiplies and FFTs per core.
+	- Adjustable worker count up to 32 threads to max out Ryzen 9 7950X.
+
+3. **Thermal Safety & Practicalities**
+	- Enforce VSYNC-off, unlimited FPS.
+	- Provide monitoring tips (HWInfo64, MSI Afterburner) and thermal throttling safeguards.
+	- Offer start/stop instructions and optional "eco" parameters for bench testing.
+
+Artifacts to Produce
+--------------------
+- `main.py`: ModernGL window config + CPU burner threads.
+- `shaders/life_update.frag` & `shaders/life_display.frag`: Reaction-diffusion core + display pass.
+- `requirements.txt`: Python deps (moderngl, moderngl-window, numpy, pyrr).
+- `README.md`: Setup, tuning, safety checklist, and show choreography ideas.
+
+Next Steps
+----------
+1. Scaffold repo structure and shader assets.
+2. Implement configurable CLI parameters (resolution, iterations, exposure, CPU workers).
+3. Smoke-test at reduced resolution (e.g., 1920x1080) to validate pipeline.
+4. Document run-book for 1080p life lab deployment (projecting onto door panel).
