@@ -192,9 +192,9 @@ def build_hold_frame(lines: Sequence[str], size: Sequence[int]) -> np.ndarray:
 
 
 class GarageHeatShow(mglw.WindowConfig):
-    """GPU-heavy biosphere simulation with CPU burners and thermal hold."""
+    """GPU-heavy tile world simulation with CPU burners and thermal hold."""
 
-    title = "Garage Life Lab - Biosphere"
+    title = "Garage Life Lab - Tile World"
     gl_version = (4, 5)
     resource_dir = Path(__file__).parent
     window_size = (1920, 1080)
@@ -467,69 +467,127 @@ class GarageHeatShow(mglw.WindowConfig):
         resolution = np.array([buffer_size[0], buffer_size[1]], dtype="f4")
         self.update_program["resolution"].write(resolution)
         self.display_program["resolution"].write(resolution)
+        self.update_program["tileSize"].value = float(max(2, self.args.tile_size))
+        self.display_program["tileSize"].value = float(max(2, self.args.tile_size))
 
     def _seed_field(self) -> None:
-        width, height = self.state_textures[0].size
-        field = np.zeros((height, width, 4), dtype=np.float32)
-        field[..., 0] = 0.96
-        field[..., 1] = 0.02
+        width_px, height_px = self.state_textures[0].size
+        tile_size = max(2, int(self.args.tile_size))
+        tiles_x = max(1, int(np.ceil(width_px / tile_size)))
+        tiles_y = max(1, int(np.ceil(height_px / tile_size)))
 
-        rng = np.random.default_rng(2025)
-        y_indices, x_indices = np.meshgrid(
-            np.arange(height),
-            np.arange(width),
+        rng = np.random.default_rng(2026)
+        tile_y, tile_x = np.meshgrid(
+            np.arange(tiles_y, dtype=np.float32),
+            np.arange(tiles_x, dtype=np.float32),
             indexing="ij",
         )
-        x_norm = x_indices / max(width - 1, 1)
-        y_norm = y_indices / max(height - 1, 1)
+        x_norm = tile_x / max(tiles_x - 1, 1)
+        y_norm = tile_y / max(tiles_y - 1, 1)
 
-        macro_wave = (
-            0.48
-            + 0.18 * np.sin(x_norm * 8.0 + 0.7)
-            + 0.15 * np.cos(y_norm * 6.0 - 1.3)
-            + 0.12 * np.sin((x_norm + y_norm) * 10.0)
+        height = (
+            0.45
+            + 0.15 * np.sin(x_norm * 7.3 + 0.9)
+            + 0.11 * np.cos(y_norm * 5.7 - 1.2)
+            + 0.08 * np.sin((x_norm + y_norm) * 11.0)
+            + 0.06 * np.cos((x_norm - y_norm) * 13.0)
+            + rng.standard_normal((tiles_y, tiles_x), dtype=np.float32) * 0.025
         )
-        field[..., 3] = np.clip(
-            macro_wave + rng.random((height, width), dtype=np.float32) * 0.14,
+
+        continent_count = max(5, (tiles_x * tiles_y) // 4000)
+        for _ in range(continent_count):
+            cx = rng.uniform(0.0, tiles_x)
+            cy = rng.uniform(0.0, tiles_y)
+            rx = rng.uniform(max(5.0, tiles_x * 0.04), max(12.0, tiles_x * 0.18))
+            ry = rng.uniform(max(5.0, tiles_y * 0.04), max(12.0, tiles_y * 0.18))
+            distance = ((tile_x - cx) / rx) ** 2 + ((tile_y - cy) / ry) ** 2
+            lift = np.clip(1.0 - distance, 0.0, 1.0)
+            height += lift * rng.uniform(0.10, 0.24)
+
+        trench_count = max(4, continent_count // 2)
+        for _ in range(trench_count):
+            cx = rng.uniform(0.0, tiles_x)
+            cy = rng.uniform(0.0, tiles_y)
+            rx = rng.uniform(max(6.0, tiles_x * 0.05), max(14.0, tiles_x * 0.16))
+            ry = rng.uniform(max(6.0, tiles_y * 0.05), max(14.0, tiles_y * 0.16))
+            distance = ((tile_x - cx) / rx) ** 2 + ((tile_y - cy) / ry) ** 2
+            carve = np.clip(1.0 - distance, 0.0, 1.0)
+            height -= carve * rng.uniform(0.08, 0.18)
+
+        ridge_bands = np.sin(x_norm * 21.0 + np.cos(y_norm * 9.0) * 2.3)
+        height += np.clip(ridge_bands - 0.45, 0.0, 1.0) * 0.08
+        height = np.clip(height, 0.0, 1.0)
+
+        sea_level = 0.46
+        ocean = (height < sea_level).astype(np.float32)
+        coast = np.clip(1.0 - np.abs(height - sea_level) / 0.07, 0.0, 1.0)
+        latitude = 1.0 - np.abs(y_norm * 2.0 - 1.0)
+
+        moisture = np.clip(
+            0.16
+            + ocean * 0.52
+            + coast * 0.22
+            + latitude * 0.12
+            + 0.08 * np.sin(x_norm * 9.0 - y_norm * 6.0)
+            + rng.standard_normal((tiles_y, tiles_x), dtype=np.float32) * 0.03,
             0.0,
             1.0,
         )
-        field[..., 2] = rng.random((height, width), dtype=np.float32) * 0.22
 
-        mega_blob_count = max(6, (width * height) // 900000)
-        micro_blob_count = max(90, (width * height) // 90000)
+        biomass = np.clip(
+            (1.0 - ocean)
+            * (
+                0.06
+                + moisture * 0.62
+                + latitude * 0.16
+                - np.clip(height - 0.72, 0.0, 1.0) * 0.50
+            ),
+            0.0,
+            1.0,
+        )
 
-        for _ in range(mega_blob_count):
-            cx = rng.integers(0, width)
-            cy = rng.integers(0, height)
-            radius = rng.integers(
-                max(90, min(width, height) // 10),
-                max(180, min(width, height) // 3),
-            )
-            mask = (x_indices - cx) ** 2 + (y_indices - cy) ** 2 <= radius ** 2
-            field[..., 1][mask] = np.maximum(field[..., 1][mask], rng.uniform(0.45, 1.0))
-            field[..., 0][mask] = np.minimum(field[..., 0][mask], rng.uniform(0.0, 0.35))
-            field[..., 3][mask] = np.clip(field[..., 3][mask] + rng.uniform(0.12, 0.32), 0.0, 1.0)
+        settlement = np.zeros((tiles_y, tiles_x), dtype=np.float32)
+        candidate_mask = (
+            (ocean < 0.5)
+            & (coast > 0.35)
+            & (biomass > 0.28)
+            & (height < 0.74)
+        )
+        candidates = np.argwhere(candidate_mask)
+        if len(candidates) > 0:
+            city_count = min(max(8, (tiles_x * tiles_y) // 1800), len(candidates))
+            city_indices = rng.choice(len(candidates), size=city_count, replace=False)
+            for candidate_index in city_indices:
+                cy, cx = candidates[candidate_index]
+                radius = int(rng.integers(1, 3))
+                y0 = max(cy - radius, 0)
+                y1 = min(cy + radius + 1, tiles_y)
+                x0 = max(cx - radius, 0)
+                x1 = min(cx + radius + 1, tiles_x)
+                patch_y, patch_x = np.meshgrid(
+                    np.arange(y0, y1, dtype=np.float32),
+                    np.arange(x0, x1, dtype=np.float32),
+                    indexing="ij",
+                )
+                distance = np.sqrt((patch_x - cx) ** 2 + (patch_y - cy) ** 2)
+                influence = np.clip(1.0 - distance / max(radius + 0.5, 1.0), 0.0, 1.0)
+                settlement[y0:y1, x0:x1] = np.maximum(
+                    settlement[y0:y1, x0:x1],
+                    influence * rng.uniform(0.35, 0.78),
+                )
 
-        for _ in range(micro_blob_count):
-            cx = rng.integers(0, width)
-            cy = rng.integers(0, height)
-            radius = rng.integers(8, 52)
-            mask = (x_indices - cx) ** 2 + (y_indices - cy) ** 2 <= radius ** 2
-            field[..., 1][mask] = np.maximum(field[..., 1][mask], rng.uniform(0.18, 0.7))
-            field[..., 0][mask] = np.minimum(field[..., 0][mask], rng.uniform(0.05, 0.7))
+        tile_field = np.stack(
+            [
+                height.astype(np.float32),
+                moisture.astype(np.float32),
+                biomass.astype(np.float32),
+                settlement.astype(np.float32),
+            ],
+            axis=-1,
+        )
 
-        current_bands = np.sin(x_norm * 13.0 + np.cos(y_norm * 9.0) * 2.2)
-        current_mask = np.clip((current_bands - 0.72) * 2.3, 0.0, 1.0)
-        field[..., 1] += current_mask * 0.16
-        field[..., 0] -= current_mask * 0.18
-        field[..., 2] += np.clip(1.0 - np.abs(current_bands), 0.0, 1.0) * 0.04
-
-        field[..., 0] = np.clip(field[..., 0] + rng.standard_normal((height, width), dtype=np.float32) * 0.02, 0.0, 1.0)
-        field[..., 1] = np.clip(field[..., 1], 0.0, 1.0)
-        field[..., 2] = np.clip(field[..., 2], 0.0, 1.0)
-        field[..., 3] = np.clip(field[..., 3], 0.0, 1.0)
-
+        field = np.repeat(np.repeat(tile_field, tile_size, axis=0), tile_size, axis=1)
+        field = field[:height_px, :width_px].copy()
         for tex in self.state_textures:
             tex.write(field.tobytes())
 
@@ -657,6 +715,7 @@ class GarageHeatShow(mglw.WindowConfig):
         parser.add_argument("--contour-contrast", type=float, default=0.75, help="Contour emphasis strength")
         parser.add_argument("--cpu-workers", type=int, default=0, help="CPU burner thread count")
         parser.add_argument("--cpu-matrix", type=int, default=896, help="CPU burner matrix size")
+        parser.add_argument("--tile-size", type=int, default=12, help="Tile size in screen pixels for the world simulation")
         parser.add_argument("--max-cpu-temp", type=float, default=75.0, help="Hold the show if the CPU exceeds this temperature in Celsius")
         parser.add_argument("--max-gpu-temp", type=float, default=70.0, help="Hold the show if the GPU exceeds this temperature in Celsius")
         parser.add_argument("--thermal-poll-seconds", type=float, default=5.0, help="Sensor poll interval in seconds")
