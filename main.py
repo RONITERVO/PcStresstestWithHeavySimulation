@@ -120,7 +120,6 @@ uniform float diffV;
 uniform float dt;
 uniform float laplaceScale;
 
-// PRNG
 float hash12(vec2 p) {
     vec3 p3 = fract(vec3(p.xyx) * .1031);
     p3 += dot(p3, p3.yzx + 33.33);
@@ -135,10 +134,10 @@ void main() {
     vec2 texel = 1.0 / resolution;
 
     // Channels:
-    // R (x): Deep Moisture/Oasis Reserve (U)
-    // G (y): Cacti & Desert Flora (V)
-    // B (z): Topography/Sand Dunes
-    // A (w): Geothermal Heat & Cosmic Energy
+    // R (x): Substrate / Empty Grid (U)
+    // G (y): Active Neural Nodes (V)
+    // B (z): Crystal / Bismuth Matrix Elevation
+    // A (w): Computational Heat / Energy Load
 
     vec4 c  = texture(stateTex, uv);
     vec4 r  = texture(stateTex, uv + vec2(texel.x, 0.0));
@@ -155,71 +154,35 @@ void main() {
     float lapH = (r.z + l.z + t.z + b_.z) * 0.2 + (tr.z + tl.z + br.z + bl.z) * 0.05 - c.z;
     float lapA = (r.w + l.w + t.w + b_.w) * 0.2 + (tr.w + tl.w + br.w + bl.w) * 0.05 - c.w;
 
-    vec2 gradH = vec2(r.z - l.z, t.z - b_.z);
-
-    // Wind Advection: broad desert winds turn slowly over time.
-    float windAngle = 0.35 + sin(time * 0.037) * 0.72 + sin(time * 0.013 + 1.7) * 0.38;
-    vec2 windDir = normalize(vec2(cos(windAngle), sin(windAngle)));
-    float flow = 0.8;
-    float windErosion = dot(windDir, gradH) * flow;
-
-    // Matter still naturally slips downhill slightly
-    float advectU = dot(gradH, vec2(r.x - l.x, t.x - b_.x)) * flow * 0.2;
-    float advectV = dot(gradH, vec2(r.y - l.y, t.y - b_.y)) * flow * 0.2;
-
-    // Cosmic Events (Meteors hitting the desert)
-    float eventInterval = 8.0;
-    float eventId = floor(time / eventInterval);
-    float eventLocalTime = fract(time / eventInterval) * eventInterval;
-    vec2 mTarget = getEventTarget(eventId, 42.0);
-    float mDist = length(uv - mTarget);
-
-    float meteorStrike = 0.0;
-    float cratering = 0.0;
-    float shockwave = 0.0;
-
-    float strikePulse = exp(-pow((eventLocalTime - 7.08) * 48.0, 2.0));
-    float craterCore = 1.0 - smoothstep(0.0, 0.035, mDist);
-    float heatCore = 1.0 - smoothstep(0.012, 0.080, mDist);
-    float shockCore = 1.0 - smoothstep(0.040, 0.150, mDist);
-    float ejectaRing = smoothstep(0.020, 0.040, mDist) * (1.0 - smoothstep(0.040, 0.065, mDist));
-
-    // Deeper craters in sand, massive ejecta ring
-    cratering = strikePulse * (-0.050 * craterCore + 0.025 * ejectaRing);
-    meteorStrike = strikePulse * 0.060 * heatCore;
-    // Shockwave devastates nearby cacti
-    shockwave = -c.y * 0.030 * strikePulse * shockCore;
-
-    // Geothermal Activity (Volcanoes)
-    float geothermalDrift = (hash12(uv + time * 0.01) - 0.49) * 0.01;
-    float heatGain = (c.w > 0.6 ? 0.005 : -0.001) + geothermalDrift;
-
-    float eruptionH = 0.0;
-    float eruptionHeat = 0.0;
-    float eruptionKill = 0.0;
-
-    vec2 eruptionCell = floor(uv * resolution / 4.0);
-    float eruptionSeed = hash12(eruptionCell + floor(time * 0.5));
-    float eruptionPulse = smoothstep(0.92, 1.0, c.w) * step(0.998, eruptionSeed);
-    eruptionH = 0.015 * eruptionPulse;
-    eruptionHeat = 0.050 * eruptionPulse;
-    eruptionKill = -c.y * 0.025 * eruptionPulse;
-
-    // Gray-Scott Reaction with ecological coupling
     float reaction = c.x * c.y * c.y;
 
-    // Sahara Desert coupling: Moisture (c.x) is rare, cacti feed slowly, high heat kills
-    float desertFeed = feed + (c.x * 0.01) - abs(c.w - 0.2) * 0.008;
-    float desertKill = kill + c.w * 0.025;
+    // Matrix heat slows down structural feed, pushing network to branch
+    float matrixFeed = feed - c.w * 0.012;
+    float matrixKill = kill + c.w * 0.012;
 
-    float du = (diffU * lapU * laplaceScale) - reaction + desertFeed * (1.0 - c.x) - advectU;
-    float dv = (diffV * lapV * laplaceScale) + reaction - (desertFeed + desertKill) * c.y - advectV + shockwave + eruptionKill;
+    float du = (diffU * lapU * laplaceScale) - reaction + matrixFeed * (1.0 - c.x);
+    float dv = (diffV * lapV * laplaceScale) + reaction - (matrixFeed + matrixKill) * c.y;
 
-    // Topography shifts slowly via wind erosion and violently via meteor events
-    float dh = lapH * 0.015 + (c.y * 0.001 - 0.0005) * dt + cratering + eruptionH - windErosion * dt * 0.05;
+    // Matrix Height organically targets active node locations
+    float targetH = smoothstep(0.25, 0.75, c.y); // Requires higher concentration to raise
+    float dh = (targetH - c.z) * 0.05 + lapH * 0.2;
 
-    // Heat diffusion and accumulation
-    float dw = (0.25 * lapA) + heatGain + meteorStrike + eruptionHeat - (c.x * 0.003);
+    // Computational Surges (Quantum tunnel events)
+    float surgeInterval = 6.0;
+    float surgeId = floor(time / surgeInterval);
+    float surgeLocalTime = fract(time / surgeInterval) * surgeInterval;
+    vec2 sTarget = getEventTarget(surgeId, 99.0);
+    float sDist = length(uv - sTarget);
+
+    float surgePulse = exp(-pow((surgeLocalTime - 1.0) * 15.0, 2.0));
+    float surgeCore = 1.0 - smoothstep(0.0, 0.03, sDist);
+    
+    // Inject extreme heat and force nodes to activate
+    float heatGain = surgePulse * surgeCore * 15.0;
+    dv += surgePulse * surgeCore * 0.5;
+
+    // Heat diffuses rapidly and is consumed by growth
+    float dw = lapA * 0.85 + heatGain + reaction * 2.5 - c.w * 0.15;
 
     fragColor = vec4(
         clamp(c.x + du * dt, 0.0, 1.0),
@@ -288,137 +251,38 @@ vec2 getEventTarget(float id, float seed) {
     return vec2(hash12(vec2(id, seed)), hash12(vec2(id, seed + 1.0)));
 }
 
-vec2 rotate2(vec2 v, float a) {
-    float s = sin(a);
-    float c = cos(a);
-    return vec2(c * v.x - s * v.y, s * v.x + c * v.y);
-}
-
-vec2 windField(vec2 xz, out float gust) {
-    float regional = fbm(vec2(time * 0.021, 4.7)) * 6.28318;
-    regional += sin(time * 0.039) * 0.95 + sin(time * 0.011 + 2.1) * 0.65;
-    vec2 baseDir = normalize(vec2(cos(regional), sin(regional)));
-
-    float shear = (fbm(xz * 0.018 + vec2(time * 0.026, -time * 0.011)) - 0.5) * 2.1;
-    shear += (fbm(xz * 0.070 - baseDir * time * 0.045) - 0.5) * 0.85;
-    vec2 localDir = normalize(rotate2(baseDir, shear));
-
-    float gustBands = fbm(xz * 0.032 - localDir * time * 0.12);
-    float gustFront = pow(max(sin(dot(xz, localDir) * 0.050 - time * 0.82 + fbm(xz * 0.010) * 6.0), 0.0), 5.0);
-    gust = clamp(0.35 + gustBands * 1.15 + gustFront * 1.1, 0.2, 2.5);
-    return localDir;
-}
-
-float asteroidDust(vec2 xz, float hTerrain, float safeFx, vec2 windDir, float gust, float eventId, float age, out float front, out float plume) {
-    front = 0.0;
-    plume = 0.0;
-    if (age <= 0.0 || age > 6.0) return 0.0;
-
-    vec2 impact = getEventTarget(eventId, 42.0) / 0.03;
-    vec2 crossDir = vec2(-windDir.y, windDir.x);
-    float radius = age * mix(4.5, 12.5, clamp(gust * 0.45, 0.0, 1.0));
-    float width = 0.9 + age * (0.55 + gust * 0.28);
-    float dist = length(xz - impact);
-    float shock = exp(-pow((dist - radius) / max(width, 0.25), 2.0));
-
-    vec2 advectedCenter = impact + windDir * (age * age * (2.2 + gust * 2.4));
-    vec2 rel = xz - advectedCenter;
-    float along = dot(rel, windDir);
-    float cross = dot(rel, crossDir);
-    float tail = smoothstep(-1.2, 4.5 + age * 1.6, along) * exp(-max(along, 0.0) / (8.0 + age * 6.0));
-    float spread = exp(-pow(cross / (1.0 + age * (0.9 + gust * 0.35)), 2.0));
-    float curl = fbm(xz * 0.22 - windDir * time * (0.45 + gust * 0.25) + vec2(eventId * 7.3));
-    plume = tail * spread * (0.45 + curl * 0.75);
-
-    float terrainPickup = smoothstep(0.18, 3.0, hTerrain);
-    float fade = exp(-age * 0.18);
-    front = shock * terrainPickup * fade;
-    plume *= terrainPickup * fade;
-
-    return (front * 3.4 + plume * 2.6) * safeFx;
-}
-
-float sandStormWave(vec2 xz, float hTerrain, float safeFx, out float crest, out float trough) {
-    float gust;
-    vec2 windDir = windField(xz, gust);
-    vec2 crossDir = vec2(-windDir.y, windDir.x);
-    float along = dot(xz, windDir);
-    float cross = dot(xz, crossDir);
-    float travel = along * 0.22 - time * (0.85 + gust * 0.95 + safeFx * 0.18);
-    travel += fbm(vec2(cross * 0.045, along * 0.021) + windDir * time * 0.11) * 4.0;
-
-    float cycle = sin(travel);
-    crest = pow(max(cycle, 0.0), 3.0);
-    trough = pow(max(-sin(travel - 0.45), 0.0), 2.0);
-
-    float broadLift = (fbm(xz * 0.075 - windDir * time * 0.22) - 0.44) * (0.60 + gust * 0.42);
-    float saltation = (fbm(xz * 1.7 - windDir * time * (1.5 + gust * 0.8)) - 0.5) * 0.16;
-    float rollingFront = pow(max(sin(along * 0.070 - time * (0.45 + gust * 0.38) + fbm(xz * 0.018) * 6.0), 0.0), 7.0);
-
-    float eventInterval = 8.0;
-    float eventId = floor(time / eventInterval);
-    float eventLocalTime = fract(time / eventInterval) * eventInterval;
-    float impactOffset = 7.08;
-
-    float frontA; float plumeA;
-    float asteroidMain = asteroidDust(xz, hTerrain, safeFx, windDir, gust, eventId, eventLocalTime - impactOffset, frontA, plumeA);
-
-    float frontB; float plumeB;
-    float asteroidCarry = asteroidDust(xz, hTerrain, safeFx, windDir, gust, eventId - 1.0, eventLocalTime + eventInterval - impactOffset, frontB, plumeB);
-
-    float asteroidStorm = asteroidMain + asteroidCarry * 0.75;
-    float ambientStorm = crest * (0.55 + gust * 0.55) + rollingFront * (0.75 + gust * 0.38);
-    float drawdown = trough * (0.20 + gust * 0.13);
-
-    crest = clamp(max(max(crest * 0.55, rollingFront), max(frontA, frontB) + max(plumeA, plumeB) * 0.45), 0.0, 1.0);
-    trough = clamp(gust * 0.34 + max(plumeA, plumeB) * 0.35, 0.0, 1.0);
-    return broadLift + saltation + ambientStorm * safeFx - drawdown + asteroidStorm;
-}
-
 float map(in vec3 p, out int matID, out vec4 stateOut) {
-    vec2 mapUV = p.xz * 0.03;
+    vec2 mapUV = p.xz * 0.06;
     vec4 state = textureLod(stateTex, mapUV, 0.0);
 
-    // R: Deep Moisture, G: Cacti, B: Sand Height, A: Heat
-    float safeFx = clamp(fxIntensity, 0.2, 1.6);
-    float detailFx = smoothstep(0.2, 1.6, safeFx);
+    // Quantize height to create Bismuth-like crystalline circuits. 
+    // Smooth the step slightly to prevent SDF raymarching discontinuities.
+    float hRaw = state.z * 2.5; 
+    float levels = mix(4.0, 10.0, smoothstep(0.2, 1.5, fxIntensity));
+    float q = hRaw * levels;
+    float hStep = (floor(q) + smoothstep(0.0, 0.2, fract(q))) / levels * 1.5;
 
-    // Terrain definition
-    float baseH = state.z * mix(2.6, 3.8, detailFx);
-
-    // Sand Dunes (Fractal ridges)
-    float duneNoise = 1.0 - abs(fbm(p.xz * 0.8 + vec2(time * 0.02)) * 2.0 - 1.0);
-    float duneRelief = pow(duneNoise, 1.8) * mix(0.4, 1.4, detailFx);
-
-    // Cacti (Sparse, tall spiky displacements based on Biomass G)
-    float cactiMask = smoothstep(0.4, 0.8, state.y);
-    float spike = fbm(p.xz * 45.0);
-    float cactiDetail = smoothstep(0.6, 1.0, spike) * cactiMask * 1.2 * detailFx;
-
-    // Craters and Volcanic Peaks (Displacement based on Heat A)
-    float rockyDetail = fbm(p.xz * 6.0) * mix(0.15, 0.45, detailFx) * smoothstep(0.3, 1.0, state.w);
-
-    float continentLift = smoothstep(0.4, 0.7, fbm(p.xz * 0.05 + vec2(19.0, 7.0)));
-    float microRelief = (fbm(p.xz * 2.5 + vec2(3.0)) - 0.5) * mix(0.04, 0.15, detailFx);
-
-    float hTerrain = baseH + duneRelief + cactiDetail + rockyDetail + microRelief + continentLift * mix(0.3, 1.2, detailFx);
+    // Tech grid gaps and trenches
+    float gridX = abs(fract(p.x * 1.5) - 0.5) * 2.0;
+    float gridZ = abs(fract(p.z * 1.5) - 0.5) * 2.0;
+    float trench = 1.0 - smoothstep(0.02, 0.12, min(gridX, gridZ));
+    
+    // Deform terrain with trenches and structural steps
+    float hTerrain = hStep - trench * 0.5 * smoothstep(0.2, 0.8, noise(p.xz * 3.0));
     float dTerrain = p.y - hTerrain;
 
-    // Sandstorm replaces the ocean logic: sweeping waves of dense dust.
-    float crest; float trough;
-    float stormLift = sandStormWave(p.xz, hTerrain, safeFx, crest, trough);
-    float hStorm = hTerrain + max(0.0, stormLift);
+    // Data Swarm / Quantum Plasma Volume
+    float swarmH = state.w * 0.8 + state.y * 0.5 + fbm(p.xz * 1.5 - vec2(time * 0.4, 0.0)) * 0.4 - 0.2;
+    float dSwarm = p.y - swarmH;
 
-    float dStorm = p.y - hStorm;
-
-    if (dTerrain < dStorm) {
-        matID = 1; // Solid Terrain / Cacti
+    if (dTerrain < dSwarm) {
+        matID = 1; // Neural Bismuth Matrix
         stateOut = state;
-        return dTerrain * 0.6; // Under-relax for terrain details
+        return dTerrain * 0.5;
     } else {
-        matID = 0; // Dense Sandstorm Volume
+        matID = 0; // Data Swarm
         stateOut = state;
-        return dStorm * 0.9;
+        return dSwarm * 0.7;
     }
 }
 
@@ -451,43 +315,35 @@ void main() {
     float contourPower = clamp(contourContrast, 0.0, 1.6);
     int maxRaySteps = clamp(raySteps, 32, MAX_STEPS);
 
-    float camTime = time * 0.12 * max(cameraSpeed, 0.01);
-    vec3 ro = vec3(camTime * 6.0, 8.5 + sin(camTime * 0.4) * 1.5, camTime * 5.0);
-    vec3 ta = vec3(ro.x + 6.0, 2.5, ro.z + 5.0 + sin(camTime * 0.8) * 2.0);
+    float camTime = time * 0.08 * max(cameraSpeed, 0.01);
+    // Lift camera baseline and look slightly down so it never dips below max terrain bounds
+    vec3 ro = vec3(camTime * 4.0, 5.5 + sin(camTime * 0.3) * 1.2, camTime * 3.0);
+    vec3 ta = ro + vec3(cos(camTime * 0.25), -0.6, sin(camTime * 0.25));
 
-    mat3 ca = setCamera(ro, ta, sin(camTime * 0.25) * 0.12);
+    mat3 ca = setCamera(ro, ta, sin(camTime * 0.15) * 0.08);
     vec3 rd = ca * normalize(vec3(p.xy, 2.0));
 
-    // Scorching desert sun
-    vec3 lightDir = normalize(vec3(0.6, 0.7, -0.4));
+    vec3 lightDir = normalize(vec3(0.5, 0.8, -0.6));
 
-    // Meteor Sky Event
-    float eventInterval = 8.0;
-    float eventId = floor(time / eventInterval);
-    float eventLocalTime = fract(time / eventInterval) * eventInterval;
+    // Deep void cyber-sky
+    vec3 skyColor = vec3(0.01, 0.02, 0.04);
+    float sun = pow(max(0.0, dot(rd, lightDir)), 120.0);
+    skyColor += vec3(0.0, 0.4, 0.8) * sun * safeFx * 0.4;
 
-    // Dusty Sahara Sky
-    vec3 skyColor = mix(vec3(0.70, 0.45, 0.25), vec3(0.95, 0.75, 0.55), rd.y * 0.5 + 0.5);
-    float sun = pow(max(0.0, dot(rd, lightDir)), 80.0);
-    skyColor += vec3(1.0, 0.9, 0.7) * sun * safeFx;
+    // Quantum Surge Flash
+    float surgeInterval = 6.0;
+    float surgeId = floor(time / surgeInterval);
+    float surgeLocalTime = fract(time / surgeInterval) * surgeInterval;
 
-    // Meteor entry flash
-    if (eventLocalTime > 6.0 && eventLocalTime < 7.5) {
-        vec2 mTargetUV = getEventTarget(eventId, 42.0);
-        vec3 mTargetWorld = vec3(mTargetUV.x / 0.03, 0.0, mTargetUV.y / 0.03);
-
-        vec3 meteorStart = mTargetWorld + vec3(25.0, 50.0, -25.0);
-        vec3 meteorEnd = mTargetWorld;
-
-        float dropPhase = smoothstep(6.0, 7.08, eventLocalTime);
-        vec3 mPos = mix(meteorStart, meteorEnd, dropPhase);
-
-        vec3 mDir = normalize(meteorEnd - meteorStart);
-        float mProj = max(0.0, dot(rd, normalize(mPos - ro)));
-
-        float flash = exp(-pow(eventLocalTime - 7.08, 2.0) * 120.0);
-        skyColor += vec3(1.0, 0.6, 0.2) * pow(mProj, 700.0) * 12.0 * (1.0 - flash);
-        skyColor += vec3(1.0, 0.8, 0.5) * flash * 6.0 * safeFx; // Global flash over the desert
+    if (surgeLocalTime > 0.5 && surgeLocalTime < 2.0) {
+        vec2 sTargetUV = getEventTarget(surgeId, 99.0);
+        vec3 sTargetWorld = vec3(sTargetUV.x / 0.06, 0.0, sTargetUV.y / 0.06);
+        vec3 toTarget = normalize(sTargetWorld - ro);
+        float sProj = max(0.0, dot(rd, toTarget));
+        
+        float flash = exp(-pow(surgeLocalTime - 1.0, 2.0) * 80.0);
+        skyColor += vec3(0.0, 1.0, 0.8) * pow(sProj, 250.0) * 6.0 * flash * safeFx;
+        skyColor += vec3(1.0, 0.0, 0.6) * flash * 1.5 * safeFx;
     }
 
     float t = 0.0;
@@ -501,16 +357,11 @@ void main() {
         int currMat; vec4 currState;
         float h = map(pos, currMat, currState);
 
-        // Volumetrics
-        if (currMat == 1) {
-            // Volcanic Lava / Smoldering Craters (A)
-            float heat = smoothstep(0.7, 1.0, currState.w);
-            vec3 lavaGlow = vec3(1.0, 0.35, 0.05);
-            volumeGlow += lavaGlow * heat * (0.025 + glow * 0.01) * safeFx / (1.0 + abs(h) * 6.0);
-
-            // Heat Haze / Dust near oases (R)
-            float oasis = smoothstep(0.3, 0.8, currState.x);
-            volumeGlow += vec3(0.7, 0.5, 0.3) * oasis * 0.01 * safeFx / (1.0 + abs(h) * 8.0);
+        if (currMat == 0) {
+            float vDense = smoothstep(0.1, 0.8, currState.y);
+            float wHot = smoothstep(0.1, 1.0, currState.w);
+            vec3 swarmColor = mix(vec3(0.0, 0.7, 1.0), vec3(1.0, 0.0, 0.8), wHot);
+            volumeGlow += swarmColor * (vDense + wHot * 0.5) * (0.04 * glow) * safeFx / (1.0 + abs(h) * 6.0);
         }
 
         if (h < SURF_DIST * (1.0 + t * 0.1) || t > MAX_DIST) {
@@ -531,84 +382,67 @@ void main() {
         float sha = calcShadow(pos + nor * 0.02, lightDir);
         float dif = clamp(dot(nor, lightDir), 0.0, 1.0) * sha;
         float sky = clamp(0.5 + 0.5 * nor.y, 0.0, 1.0);
-        float fre = pow(clamp(1.0 + dot(nor, rd), 0.0, 1.0), 3.0);
+        float fre = pow(clamp(1.0 + dot(nor, rd), 0.0, 1.0), 5.0);
 
         vec3 matColor;
         vec3 emission = vec3(0.0);
 
         if (matID == 1) {
-            // Sahara Sand Base Terrain
-            vec3 sandBase = vec3(0.78, 0.56, 0.35);
-            vec3 sandShadow = vec3(0.48, 0.30, 0.18);
-            matColor = mix(sandShadow, sandBase, smoothstep(0.2, 0.9, nor.y));
+            // Obsidian / Bismuth Matrix Base
+            matColor = vec3(0.03, 0.04, 0.06);
 
-            // Cacti (Biomass G)
-            vec3 flora = vec3(0.15, 0.42, 0.20);
-            float isCactus = smoothstep(0.5, 0.9, state.y) * smoothstep(0.5, 1.0, fbm(pos.xz * 45.0));
-            matColor = mix(matColor, flora, isCactus);
+            // Bismuth Iridescence
+            vec3 iridescence = 0.5 + 0.5 * cos(6.28318 * (state.z * 1.5 + vec3(0.0, 0.33, 0.67)));
+            matColor += iridescence * 0.15 * sha * safeFx;
 
-            // Burned Earth & Meteor Glass (A)
-            vec3 obsidian = vec3(0.12, 0.08, 0.06);
-            float heatGlass = smoothstep(0.6, 0.9, state.w);
-            matColor = mix(matColor, obsidian, heatGlass);
+            // Compute grid location for glowing circuit traces
+            float gridX = abs(fract(pos.x * 1.5) - 0.5) * 2.0;
+            float gridZ = abs(fract(pos.z * 1.5) - 0.5) * 2.0;
+            float isTrench = 1.0 - smoothstep(0.02, 0.06, min(gridX, gridZ));
+            float edgeGlow = smoothstep(0.08, 0.0, min(gridX, gridZ));
+            float contourLine = 1.0 - smoothstep(
+                0.0,
+                0.055,
+                abs(fract((pos.x * 0.35 + pos.z * 0.45 + pos.y * 1.8) * 5.0) - 0.5)
+            );
+            matColor += vec3(0.0, 0.45, 0.55) * contourLine * contourPower * 0.18;
 
-            // Add shiny glass reflection inside craters
-            float glassSpec = pow(clamp(dot(reflect(rd, nor), lightDir), 0.0, 1.0), 64.0) * heatGlass * sha;
-            emission += vec3(1.0, 0.8, 0.6) * glassSpec * 1.5;
+            // Data Path Emissions
+            vec3 pathGlow = mix(vec3(0.0, 0.8, 1.0), vec3(1.0, 0.2, 0.6), state.w);
+            emission += pathGlow * isTrench * state.y * 3.0 * safeFx;
+            emission += pathGlow * edgeGlow * state.w * 4.0 * safeFx;
 
-            // Wind ripples (contour mapping)
-            float ripple = (1.0 - smoothstep(0.0, 0.06, abs(fract((pos.x * 0.6 + pos.z * 0.4 + pos.y * 1.5) * 6.0) - 0.5))) * contourPower;
-            matColor += vec3(0.18, 0.10, 0.05) * ripple * 0.25;
-
-            // Lava Emission (A)
-            float lavaMask = smoothstep(0.85, 1.0, state.w);
-            emission += vec3(2.5, 0.7, 0.1) * lavaMask * (1.0 + 0.3 * sin(time * 6.0 + pos.x)) * safeFx;
+            // Shiny matrix reflections
+            float spec = pow(clamp(dot(reflect(rd, nor), lightDir), 0.0, 1.0), 32.0) * sha;
+            emission += vec3(0.5, 0.8, 1.0) * spec * 0.5;
 
         } else {
-            // Sandstorm Wave
-            float waveCrest; float waveTrough;
-            float approximateTerrain = state.z * 3.25 + 1.10;
-            float stormLift = sandStormWave(pos.xz, approximateTerrain, safeFx, waveCrest, waveTrough);
-            float stormDepth = max(0.18, max(stormLift, 0.0));
-            float verticalFill = 1.0 - clamp((pos.y - approximateTerrain) / stormDepth, 0.0, 1.0);
-            float stormDensity = clamp(verticalFill * 0.82 + waveTrough * 0.22 + waveCrest * 0.38, 0.0, 1.0);
-
-            vec3 dustThick = vec3(0.42, 0.26, 0.14);
-            vec3 dustLight = vec3(0.85, 0.65, 0.45);
-            matColor = mix(dustThick, dustLight, stormDensity);
-
-            float swirl = smoothstep(0.4, 0.8, fbm(pos.xz * 2.5 + vec2(time * 0.6, -time * 0.3)));
-            matColor = mix(matColor, vec3(0.9, 0.75, 0.55), clamp(waveCrest * (0.4 + swirl * 0.6), 0.0, 0.8));
-
-            vec3 ref = reflect(rd, nor);
-            float spe = pow(clamp(dot(ref, lightDir), 0.0, 1.0), 8.0) * sha; // Rough, broad specular for dust
-            emission += vec3(0.6, 0.5, 0.4) * spe * 0.3 * waveCrest;
-
-            // Ambient scattering within the dust wave
-            emission += vec3(0.8, 0.5, 0.3) * waveCrest * safeFx * 0.4;
-            emission += volumeGlow * 0.4;
+            // Surface of the dense Quantum Swarm
+            matColor = mix(vec3(0.0, 0.15, 0.25), vec3(0.6, 0.1, 0.4), state.y);
+            emission += matColor * state.w * 1.5 * safeFx;
+            
+            float spec = pow(clamp(dot(reflect(rd, nor), lightDir), 0.0, 1.0), 8.0) * sha;
+            emission += vec3(0.0, 0.6, 0.8) * spec * 0.4;
+            emission += volumeGlow * 0.3;
         }
 
         vec3 lin = vec3(0.0);
-        lin += 1.8 * dif * vec3(1.0, 0.9, 0.8);
-        lin += 0.8 * sky * vec3(0.5, 0.4, 0.3) * occ; // Warm ambient
-        lin += 0.4 * fre * vec3(0.9, 0.8, 0.7) * occ;
+        lin += 1.2 * dif * vec3(0.8, 0.9, 1.0);
+        lin += 0.6 * sky * vec3(0.1, 0.2, 0.3) * occ;
+        lin += 0.8 * fre * vec3(0.4, 0.8, 1.0) * occ;
 
         color = matColor * lin + emission;
 
-        // Thick sandy fog in the distance
-        float fog = 1.0 - exp(-0.0012 * t * t);
+        float fog = 1.0 - exp(-0.0015 * t * t);
         color = mix(color, skyColor, fog);
     }
 
     color += volumeGlow * (1.0 + safeFx * 0.5);
 
-    // Post-Processing: ACES Tonemapping
     color *= exposure;
     color = (color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14);
     color = pow(color, vec3(1.0 / max(gamma, 0.1)));
 
-    // Vignette
     vec2 q = gl_FragCoord.xy / resolution.xy;
     color *= 0.5 + 0.5 * pow(16.0 * q.x * q.y * (1.0 - q.x) * (1.0 - q.y), 0.2);
 
@@ -722,9 +556,9 @@ def build_hold_frame(lines: Sequence[str], size: Sequence[int]) -> np.ndarray:
     stripe = 0.5 + 0.5 * np.sin(x_gradient * 18.0 + y_gradient * 11.0)
 
     frame = np.zeros((height, width, 3), dtype=np.uint8)
-    frame[..., 0] = np.clip(50.0 + 40.0 * (1.0 - y_gradient) + stripe * 12.0, 0, 255).astype(np.uint8)
-    frame[..., 1] = np.clip(30.0 + 20.0 * (1.0 - y_gradient) + stripe * 8.0, 0, 255).astype(np.uint8)
-    frame[..., 2] = np.clip(15.0 + 10.0 * (1.0 - y_gradient) + stripe * 7.0, 0, 255).astype(np.uint8)
+    frame[..., 0] = np.clip(10.0 + 10.0 * (1.0 - y_gradient) + stripe * 5.0, 0, 255).astype(np.uint8)
+    frame[..., 1] = np.clip(5.0 + 10.0 * (1.0 - y_gradient) + stripe * 5.0, 0, 255).astype(np.uint8)
+    frame[..., 2] = np.clip(30.0 + 20.0 * (1.0 - y_gradient) + stripe * 10.0, 0, 255).astype(np.uint8)
 
     margin = max(24, min(width, height) // 12)
     max_chars = max((len(_sanitize_text(line)) for line in lines), default=1)
@@ -740,11 +574,11 @@ def build_hold_frame(lines: Sequence[str], size: Sequence[int]) -> np.ndarray:
 
     for index, line in enumerate(lines):
         if index == 0:
-            color = (255, 132, 78)
+            color = (255, 50, 100)
         elif index >= len(lines) - 2:
-            color = (240, 210, 180)
+            color = (100, 200, 255)
         else:
-            color = (255, 250, 240)
+            color = (200, 255, 255)
         line_y = start_y + index * (line_height + line_gap)
         _draw_text_line(frame, line, line_y, scale, color)
 
@@ -796,11 +630,11 @@ def build_hud_frame(
         right_x = margin
         right_y = margin + left_panel_height + gap
 
-    panel_color = (20, 14, 8, 172)
-    line_color = (230, 150, 40, 210)
-    title_color = (255, 250, 240, 245)
-    body_color = (240, 210, 180, 230)
-    warn_color = (255, 100, 80, 238)
+    panel_color = (5, 10, 20, 200)
+    line_color = (0, 255, 180, 210)
+    title_color = (255, 255, 255, 245)
+    body_color = (150, 220, 255, 230)
+    warn_color = (255, 50, 100, 238)
 
     _fill_rect(frame, left_x, left_y, left_x + left_panel_width, left_y + left_panel_height, panel_color)
     _fill_rect(frame, left_x, left_y, left_x + scale, left_y + left_panel_height, line_color)
@@ -832,7 +666,7 @@ def build_hud_frame(
     _fill_rect(frame, right_x, right_y, right_x + scale, right_y + right_panel_height, line_color)
     cursor_y = right_y + pad_y
     for line in right_lines:
-        color = warn_color if "OFFLINE" in line or "OFF" in line else body_color
+        color = warn_color if "OFFLINE" in line or "OFF" in line or "LOST" in line else body_color
         _draw_text_line(
             frame,
             line,
@@ -847,7 +681,7 @@ def build_hud_frame(
     return frame
 
 class GarageHeatShow(mglw.WindowConfig):
-    title = "Garage Life Lab - 3D Sahara Bio-World"
+    title = "Garage Life Lab - NEURAL MATRIX CONTAINMENT"
     gl_version = (4, 5)
     resource_dir = Path(__file__).parent
     window_size = (1920, 1080)
@@ -999,20 +833,20 @@ class GarageHeatShow(mglw.WindowConfig):
                 if gpu_temp is None:
                     self.gpu_sensor_failures += 1
                     if self.gpu_sensor_failures >= 3:
-                        reasons.append("GPU SENSOR OFFLINE")
+                        reasons.append("GPU TELEMETRY LOST")
                 else:
                     self.gpu_sensor_failures = 0
                     if gpu_temp > self.args.max_gpu_temp:
                         reasons.append(
-                            f"GPU {gpu_temp:.1f}C OVER LIMIT {self.args.max_gpu_temp:.1f}C"
+                            f"GPU {gpu_temp:.1f}C EXCEEDS LIMIT {self.args.max_gpu_temp:.1f}C"
                         )
 
             if self.args.max_cpu_temp > 0:
                 if cpu_temp is None:
-                    notes.append("CPU SENSOR OFFLINE")
+                    notes.append("CPU TELEMETRY LOST")
                 elif cpu_temp > self.args.max_cpu_temp:
                     reasons.append(
-                        f"CPU {cpu_temp:.1f}C OVER LIMIT {self.args.max_cpu_temp:.1f}C"
+                        f"CPU {cpu_temp:.1f}C EXCEEDS LIMIT {self.args.max_cpu_temp:.1f}C"
                     )
 
             if reasons:
@@ -1029,7 +863,7 @@ class GarageHeatShow(mglw.WindowConfig):
         log_path = log_dir / "thermal_events.log"
         last_event_path = log_dir / "last_thermal_hold.txt"
 
-        log_lines = [f"[{timestamp}] THERMAL HOLD", *reasons]
+        log_lines = [f"[{timestamp}] CONTAINMENT BREACH AVERTED: THERMAL HOLD", *reasons]
         if notes:
             log_lines.extend(notes)
         gpu_temp = self.latest_temperatures.get("GPU")
@@ -1039,7 +873,7 @@ class GarageHeatShow(mglw.WindowConfig):
         if cpu_temp is not None:
             sensor_name = self.cpu_sensor_name or "CPU"
             log_lines.append(f"LAST {sensor_name.upper()} TEMP {cpu_temp:.1f}C")
-        log_lines.append("LOADS STOPPED TO COOL SYSTEM")
+        log_lines.append("QUANTUM LOADS HALTED TO COOL SYSTEM")
         log_lines.append("")
 
         with log_path.open("a", encoding="utf-8") as handle:
@@ -1083,10 +917,10 @@ class GarageHeatShow(mglw.WindowConfig):
         log_path = self._write_thermal_logs(reasons, notes)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         hold_lines = [
-            "THERMAL HOLD",
+            "CONTAINMENT BREACH AVERTED",
             *reasons,
             *notes,
-            "LOADS STOPPED TO COOL SYSTEM",
+            "QUANTUM LOADS HALTED TO COOL SYSTEM",
             timestamp,
             "SEE LOGS THERMAL EVENTS LOG",
             "PRESS ESC TO EXIT",
@@ -1111,7 +945,7 @@ class GarageHeatShow(mglw.WindowConfig):
         if cpu_temp is not None:
             parts.append(f"CPU {cpu_temp:.0f}C")
         elif self.args.max_cpu_temp > 0 and not self.args.no_thermal_hold:
-            parts.append("CPU SENSOR OFFLINE")
+            parts.append("CPU TELEMETRY LOST")
         if parts:
             self.wnd.title = f"{self.base_title} | " + " | ".join(parts)
         else:
@@ -1128,7 +962,7 @@ class GarageHeatShow(mglw.WindowConfig):
         if limit <= 0:
             return f"{label} HOLD OFF"
         if value is None:
-            return f"{label} SENSOR OFFLINE"
+            return f"{label} TELEMETRY LOST"
         return f"{label} {value:.0f}C LIMIT {limit:.0f}C"
 
     def _hud_lines(self) -> Sequence[Sequence[str]]:
@@ -1141,11 +975,11 @@ class GarageHeatShow(mglw.WindowConfig):
             cpu_temp = self.latest_temperatures.get("CPU")
         left_lines = [
             "GARAGE LIFE LAB",
-            "3D SAHARA ECOSYSTEM",
-            f"{width}X{height} MAP {tiles_x}X{tiles_y}",
-            f"SIM STEP {self.args.substeps} RAYMARCH {self.args.ray_steps}",
-            f"FX {self.args.fx_intensity:.1f} CAM {self.args.camera_speed:.1f}",
-            f"CPU WORKERS {self.args.cpu_workers}",
+            "NEURAL MATRIX CONTAINMENT",
+            f"QUANTUM GRID {width}X{height} NODES {tiles_x}X{tiles_y}",
+            f"SIM CYCLE {self.args.substeps} TENSOR {self.args.ray_steps}",
+            f"OVERRIDE FX {self.args.fx_intensity:.1f} CAM {self.args.camera_speed:.1f}",
+            f"ANNEALING WORKERS {self.args.cpu_workers}",
         ]
         right_lines = [
             self._temperature_line("GPU", gpu_temp, self.args.max_gpu_temp),
@@ -1219,89 +1053,27 @@ class GarageHeatShow(mglw.WindowConfig):
         tiles_y = max(1, int(np.ceil(height_px / tile_size)))
 
         rng = np.random.default_rng(4242)
-        tile_y, tile_x = np.meshgrid(
-            np.arange(tiles_y, dtype=np.float32),
-            np.arange(tiles_x, dtype=np.float32),
-            indexing="ij",
-        )
-        x_norm = tile_x / max(tiles_x - 1, 1)
-        y_norm = tile_y / max(tiles_y - 1, 1)
 
-        dunes = 0.45 + 0.20 * np.sin(x_norm * 14.3 + np.cos(y_norm * 8.2) * 2.0)
-        dunes += 0.12 * np.sin((y_norm + x_norm) * 9.5)
+        reaction_u = np.ones((tiles_y, tiles_x), dtype=np.float32)
+        reaction_v = np.zeros((tiles_y, tiles_x), dtype=np.float32)
 
-        height = np.clip(
-            dunes
-            + rng.standard_normal((tiles_y, tiles_x), dtype=np.float32) * 0.025,
-            0.0, 1.0
-        )
+        seed_count = max(5, (tiles_x * tiles_y) // 300)
+        for _ in range(seed_count):
+            cx = rng.integers(0, tiles_x)
+            cy = rng.integers(0, tiles_y)
+            radius = rng.integers(2, 8)
+            y, x = np.ogrid[-cy:tiles_y-cy, -cx:tiles_x-cx]
+            mask = x*x + y*y <= radius*radius
+            reaction_v[mask] = 1.0
+            reaction_u[mask] = 0.5
 
-        continent_count = max(5, (tiles_x * tiles_y) // 4000)
-        for _ in range(continent_count):
-            cx = rng.uniform(0.0, tiles_x)
-            cy = rng.uniform(0.0, tiles_y)
-            rx = rng.uniform(max(5.0, tiles_x * 0.04), max(12.0, tiles_x * 0.18))
-            ry = rng.uniform(max(5.0, tiles_y * 0.04), max(12.0, tiles_y * 0.18))
-            distance = ((tile_x - cx) / rx) ** 2 + ((tile_y - cy) / ry) ** 2
-            lift = np.clip(1.0 - distance, 0.0, 1.0)
-            height += lift * rng.uniform(0.10, 0.30)
+        height = rng.uniform(0.0, 0.2, size=(tiles_y, tiles_x)).astype(np.float32)
+        heat = np.zeros((tiles_y, tiles_x), dtype=np.float32)
 
-        trench_count = max(4, continent_count // 2)
-        for _ in range(trench_count):
-            cx = rng.uniform(0.0, tiles_x)
-            cy = rng.uniform(0.0, tiles_y)
-            rx = rng.uniform(max(6.0, tiles_x * 0.05), max(14.0, tiles_x * 0.16))
-            ry = rng.uniform(max(6.0, tiles_y * 0.05), max(14.0, tiles_y * 0.16))
-            distance = ((tile_x - cx) / rx) ** 2 + ((tile_y - cy) / ry) ** 2
-            carve = np.clip(1.0 - distance, 0.0, 1.0)
-            height -= carve * rng.uniform(0.10, 0.25)
-
-        height = np.clip(height, 0.0, 1.0)
-
-        sand_sea_level = 0.30
-        deep_sand = (height < sand_sea_level).astype(np.float32)
-        oasis_areas = np.clip(1.0 - np.abs(height - sand_sea_level) / 0.05, 0.0, 1.0)
-
-        moisture = np.clip(
-            0.05
-            + deep_sand * 0.30
-            + oasis_areas * 0.45
-            + rng.standard_normal((tiles_y, tiles_x), dtype=np.float32) * 0.02,
-            0.0,
-            1.0,
-        )
-
-        biomass = np.clip(
-            (1.0 - deep_sand)
-            * (
-                0.02
-                + moisture * 0.50
-                - np.clip(height - 0.70, 0.0, 1.0) * 0.60
-            ),
-            0.0,
-            1.0,
-        )
-
-        geothermal_faults = np.clip(
-            np.abs(np.sin(x_norm * 18.0 + np.sin(y_norm * 22.0)) * 0.5) * 2.0, 0.0, 1.0
-        )
-        heat = np.clip(1.0 - geothermal_faults * 3.0, 0.0, 1.0)
-
-        reaction_u = np.clip(1.0 - biomass * 0.20 + moisture * 0.05, 0.0, 1.0)
-        reaction_v = np.clip(biomass * 0.70 + moisture * 0.15, 0.0, 1.0)
-
-        tile_field = np.stack(
-            [
-                reaction_u.astype(np.float32),
-                reaction_v.astype(np.float32),
-                height.astype(np.float32),
-                heat.astype(np.float32),
-            ],
-            axis=-1,
-        )
-
+        tile_field = np.stack([reaction_u, reaction_v, height, heat], axis=-1)
         field = np.repeat(np.repeat(tile_field, tile_size, axis=0), tile_size, axis=1)
         field = field[:height_px, :width_px].copy()
+        
         for tex in self.state_textures:
             tex.write(field.tobytes())
 
@@ -1324,7 +1096,7 @@ class GarageHeatShow(mglw.WindowConfig):
             thread = threading.Thread(
                 target=self._cpu_burner,
                 args=(worker_id,),
-                name=f"cpu-burner-{worker_id}",
+                name=f"quantum-annealer-{worker_id}",
                 daemon=True,
             )
             thread.start()
@@ -1441,24 +1213,24 @@ class GarageHeatShow(mglw.WindowConfig):
     def add_arguments(cls, parser) -> None:
         parser.add_argument("--width", type=int, default=cls.window_size[0], help="Render width")
         parser.add_argument("--height", type=int, default=cls.window_size[1], help="Render height")
-        parser.add_argument("--feed", type=float, default=0.035, help="Gray-Scott base feed rate")
-        parser.add_argument("--kill", type=float, default=0.060, help="Gray-Scott base kill rate")
-        parser.add_argument("--diff-u", type=float, default=0.16, help="Diffusion rate for U")
-        parser.add_argument("--diff-v", type=float, default=0.08, help="Diffusion rate for V")
+        parser.add_argument("--feed", type=float, default=0.035, help="Neural matrix base feed rate")
+        parser.add_argument("--kill", type=float, default=0.060, help="Neural matrix base kill rate")
+        parser.add_argument("--diff-u", type=float, default=0.16, help="Diffusion rate for Substrate")
+        parser.add_argument("--diff-v", type=float, default=0.08, help="Diffusion rate for Active Nodes")
         parser.add_argument("--time-step", dest="time_step", type=float, default=1.0, help="Simulation time step")
         parser.add_argument("--substeps", type=int, default=8, help="Simulation steps per frame")
         parser.add_argument("--laplace-scale", type=float, default=1.0, help="Global laplacian multiplier")
         parser.add_argument("--anim-speed", type=float, default=1.0, help="Global animation multiplier")
-        parser.add_argument("--exposure", type=float, default=1.4, help="Display exposure")
+        parser.add_argument("--exposure", type=float, default=1.5, help="Display exposure")
         parser.add_argument("--glow", type=float, default=1.1, help="Display glow factor")
         parser.add_argument("--gamma", type=float, default=1.2, help="Display gamma correction")
         parser.add_argument("--contour-contrast", type=float, default=0.75, help="Contour emphasis strength")
-        parser.add_argument("--ray-steps", type=int, default=96, help="Maximum raymarch steps per pixel")
-        parser.add_argument("--fx-intensity", type=float, default=1.0, help="Cinematic glow, aurora, terrain, and material intensity")
+        parser.add_argument("--ray-steps", type=int, default=120, help="Maximum raymarch steps per pixel")
+        parser.add_argument("--fx-intensity", type=float, default=1.2, help="Matrix bloom and structural intensity")
         parser.add_argument("--camera-speed", type=float, default=1.0, help="Cinematic camera speed multiplier")
-        parser.add_argument("--cpu-workers", type=int, default=0, help="CPU burner thread count")
-        parser.add_argument("--cpu-matrix", type=int, default=896, help="CPU burner matrix size")
-        parser.add_argument("--tile-size", type=int, default=12, help="Base resolution downscale factor for fluid sim")
+        parser.add_argument("--cpu-workers", type=int, default=0, help="Quantum annealing burner thread count")
+        parser.add_argument("--cpu-matrix", type=int, default=896, help="Quantum annealing burner matrix size")
+        parser.add_argument("--tile-size", type=int, default=10, help="Base resolution downscale factor for fluid sim")
         parser.add_argument("--max-cpu-temp", type=float, default=75.0, help="Hold the show if the CPU exceeds this temperature in Celsius")
         parser.add_argument("--max-gpu-temp", type=float, default=70.0, help="Hold the show if the GPU exceeds this temperature in Celsius")
         parser.add_argument("--thermal-poll-seconds", type=float, default=5.0, help="Sensor poll interval in seconds")
