@@ -109,6 +109,7 @@ SIM_FRAG_SHADER = """
 #version 450
 in vec2 uv;
 out vec4 fragColor;
+
 uniform sampler2D stateTex;
 uniform vec2 resolution;
 uniform float time;
@@ -118,60 +119,76 @@ uniform float diffU;
 uniform float diffV;
 uniform float dt;
 uniform float laplaceScale;
-uniform float noiseStrength;
-uniform float parameterDrift;
 
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * .1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
 }
 
-// Fluid advection based on terrain topography
+vec2 getEventTarget(float id, float seed) {
+    return vec2(hash12(vec2(id, seed)), hash12(vec2(id, seed + 1.0)));
+}
+
 void main() {
     vec2 texel = 1.0 / resolution;
 
-    vec4 c = texture(stateTex, uv);
-    vec4 r = texture(stateTex, uv + vec2(texel.x, 0.0));
-    vec4 l = texture(stateTex, uv - vec2(texel.x, 0.0));
-    vec4 t = texture(stateTex, uv + vec2(0.0, texel.y));
-    vec4 b = texture(stateTex, uv - vec2(0.0, texel.y));
-    vec4 tr = texture(stateTex, uv + texel);
+    // Channels:
+    // R (x): Substrate / Empty Grid (U)
+    // G (y): Active Neural Nodes (V)
+    // B (z): Crystal / Bismuth Matrix Elevation
+    // A (w): Computational Heat / Energy Load
+
+    vec4 c  = texture(stateTex, uv);
+    vec4 r  = texture(stateTex, uv + vec2(texel.x, 0.0));
+    vec4 l  = texture(stateTex, uv - vec2(texel.x, 0.0));
+    vec4 t  = texture(stateTex, uv + vec2(0.0, texel.y));
+    vec4 b_ = texture(stateTex, uv - vec2(0.0, texel.y));
+    vec4 tr = texture(stateTex, uv + vec2(texel.x, texel.y));
     vec4 tl = texture(stateTex, uv + vec2(-texel.x, texel.y));
     vec4 br = texture(stateTex, uv + vec2(texel.x, -texel.y));
     vec4 bl = texture(stateTex, uv - texel);
 
-    // Compute standard laplacian
-    float lapU = (r.r + l.r + t.r + b.r) * 0.2 + (tr.r + tl.r + br.r + bl.r) * 0.05 - c.r;
-    float lapV = (r.g + l.g + t.g + b.g) * 0.2 + (tr.g + tl.g + br.g + bl.g) * 0.05 - c.g;
+    float lapU = (r.x + l.x + t.x + b_.x) * 0.2 + (tr.x + tl.x + br.x + bl.x) * 0.05 - c.x;
+    float lapV = (r.y + l.y + t.y + b_.y) * 0.2 + (tr.y + tl.y + br.y + bl.y) * 0.05 - c.y;
+    float lapH = (r.z + l.z + t.z + b_.z) * 0.2 + (tr.z + tl.z + br.z + bl.z) * 0.05 - c.z;
+    float lapA = (r.w + l.w + t.w + b_.w) * 0.2 + (tr.w + tl.w + br.w + bl.w) * 0.05 - c.w;
 
-    // Terrain Gradient (channel B is height, channel A is settlement/city energy)
-    vec2 gradH = vec2(r.b - l.b, t.b - b.b);
+    float reaction = c.x * c.y * c.y;
 
-    // Compute advection vectors (chemicals flow down height gradients)
-    float flowStrength = 0.8;
-    float advectU = dot(gradH, vec2(r.r - l.r, t.r - b.r)) * flowStrength;
-    float advectV = dot(gradH, vec2(r.g - l.g, t.g - b.g)) * flowStrength;
+    // Matrix heat slows down structural feed, pushing network to branch
+    float matrixFeed = feed - c.w * 0.012;
+    float matrixKill = kill + c.w * 0.012;
 
-    float wetNoise = (hash(uv * resolution + floor(time * 0.35)) - 0.5) * noiseStrength;
+    float du = (diffU * lapU * laplaceScale) - reaction + matrixFeed * (1.0 - c.x);
+    float dv = (diffV * lapV * laplaceScale) + reaction - (matrixFeed + matrixKill) * c.y;
 
-    // Add local chaotic drift
-    float localFeed = feed + c.a * 0.015 * sin(time * 0.1 + uv.x * 20.0) + wetNoise * 0.18;
-    float localKill = kill + (1.0 - c.a) * 0.01 * cos(time * 0.15 + uv.y * 15.0) + parameterDrift * 0.6;
+    // Matrix Height organically targets active node locations
+    float targetH = smoothstep(0.25, 0.75, c.y); // Requires higher concentration to raise
+    float dh = (targetH - c.z) * 0.05 + lapH * 0.2;
 
-    // Growth based on moisture
-    float reaction = c.r * c.g * c.g;
+    // Computational Surges (Quantum tunnel events)
+    float surgeInterval = 6.0;
+    float surgeId = floor(time / surgeInterval);
+    float surgeLocalTime = fract(time / surgeInterval) * surgeInterval;
+    vec2 sTarget = getEventTarget(surgeId, 99.0);
+    float sDist = length(uv - sTarget);
 
-    // Integration
-    float du = (diffU * lapU * laplaceScale) - reaction + localFeed * (1.0 - c.r) - advectU;
-    float dv = (diffV * lapV * laplaceScale) + reaction - (localFeed + localKill) * c.g - advectV;
+    float surgePulse = exp(-pow((surgeLocalTime - 1.0) * 15.0, 2.0));
+    float surgeCore = 1.0 - smoothstep(0.0, 0.03, sDist);
+    
+    // Inject extreme heat and force nodes to activate
+    float heatGain = surgePulse * surgeCore * 15.0;
+    dv += surgePulse * surgeCore * 0.5;
 
-    // Modify terrain height organically over time based on biomass (V)
-    float dh = (c.g * 0.01 - 0.002 + wetNoise * 0.015) * dt * c.a;
+    // Heat diffuses rapidly and is consumed by growth
+    float dw = lapA * 0.85 + heatGain + reaction * 2.5 - c.w * 0.15;
 
     fragColor = vec4(
-        clamp(c.r + du * dt, 0.0, 1.0),
-        clamp(c.g + dv * dt, 0.0, 1.0),
-        clamp(c.b + dh * dt, 0.0, 1.0),
-        c.a
+        clamp(c.x + du * dt, 0.0, 1.0),
+        clamp(c.y + dv * dt, 0.0, 1.0),
+        clamp(c.z + dh * dt, 0.0, 1.0),
+        clamp(c.w + dw * dt, 0.0, 1.0)
     );
 }
 """
@@ -180,6 +197,7 @@ DISPLAY_FRAG_SHADER = """
 #version 450
 in vec2 uv;
 out vec4 fragColor;
+
 uniform sampler2D stateTex;
 uniform vec2 resolution;
 uniform float time;
@@ -187,27 +205,14 @@ uniform float exposure;
 uniform float glow;
 uniform float gamma;
 uniform float contourContrast;
-uniform float colorShift;
 uniform float cameraSpeed;
 uniform float fxIntensity;
 uniform int raySteps;
 
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(41.7, 289.1))) * 45758.5453);
-}
+#define MAX_STEPS 160
+#define MAX_DIST 40.0
+#define SURF_DIST 0.002
 
-float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
-// Raymarching camera and environment setup
 mat3 setCamera(in vec3 ro, in vec3 ta, float cr) {
     vec3 cw = normalize(ta - ro);
     vec3 cp = vec3(sin(cr), cos(cr), 0.0);
@@ -216,186 +221,230 @@ mat3 setCamera(in vec3 ro, in vec3 ta, float cr) {
     return mat3(cu, cv, cw);
 }
 
-// Terrain SDF derived from the 2D simulation texture
-float map(in vec3 p, out float matID, out vec4 stateOut) {
-    // Scale world to texture UVs
-    vec2 mapUV = p.xz * 0.04;
+float hash12(vec2 p) {
+    vec3 p3  = fract(vec3(p.xyx) * .1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash12(i + vec2(0.0, 0.0)), hash12(i + vec2(1.0, 0.0)), f.x),
+               mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+float fbm(vec2 p) {
+    float v = 0.0;
+    float a = 0.5;
+    mat2 rot = mat2(0.866, -0.5, 0.5, 0.866);
+    for (int i = 0; i < 4; i++) {
+        v += a * noise(p);
+        p = rot * p * 2.0 + vec2(100.0);
+        a *= 0.5;
+    }
+    return v;
+}
+
+vec2 getEventTarget(float id, float seed) {
+    return vec2(hash12(vec2(id, seed)), hash12(vec2(id, seed + 1.0)));
+}
+
+float map(in vec3 p, out int matID, out vec4 stateOut) {
+    vec2 mapUV = p.xz * 0.06;
     vec4 state = textureLod(stateTex, mapUV, 0.0);
 
-    // Terrain height (b) and biomass extrusion (g)
-    float safeFx = clamp(fxIntensity, 0.2, 1.6);
-    float baseHeight = state.b * mix(2.7, 3.9, safeFx);
-    float biomassExtrusion = smoothstep(0.16, 0.86, state.g) * mix(0.85, 2.15, safeFx);
-    float h = baseHeight + biomassExtrusion;
+    // Quantize height to create Bismuth-like crystalline circuits. 
+    // Smooth the step slightly to prevent SDF raymarching discontinuities.
+    float hRaw = state.z * 2.5; 
+    float levels = mix(4.0, 10.0, smoothstep(0.2, 1.5, fxIntensity));
+    float q = hRaw * levels;
+    float hStep = (floor(q) + smoothstep(0.0, 0.2, fract(q))) / levels * 1.5;
 
-    // Add high frequency fractal noise for detail
-    float detail = sin(p.x * 8.0) * cos(p.z * 8.3) * 0.035 + sin(p.x * 15.0) * cos(p.z * 14.1) * 0.014;
-    detail += (noise(p.xz * 2.4 + time * 0.02) - 0.5) * 0.045;
-    h += detail * smoothstep(0.2, 0.8, state.b) * safeFx;
+    // Tech grid gaps and trenches
+    float gridX = abs(fract(p.x * 1.5) - 0.5) * 2.0;
+    float gridZ = abs(fract(p.z * 1.5) - 0.5) * 2.0;
+    float trench = 1.0 - smoothstep(0.02, 0.12, min(gridX, gridZ));
+    
+    // Deform terrain with trenches and structural steps
+    float hTerrain = hStep - trench * 0.5 * smoothstep(0.2, 0.8, noise(p.xz * 3.0));
+    float dTerrain = p.y - hTerrain;
 
-    float dTerrain = p.y - h;
+    // Data Swarm / Quantum Plasma Volume
+    float swarmH = state.w * 0.8 + state.y * 0.5 + fbm(p.xz * 1.5 - vec2(time * 0.4, 0.0)) * 0.4 - 0.2;
+    float dSwarm = p.y - swarmH;
 
-    // Water plane
-    float dWater = p.y - 1.55;
-
-    if (dTerrain < dWater) {
-        matID = 1.0; // Terrain/Organics
+    if (dTerrain < dSwarm) {
+        matID = 1; // Neural Bismuth Matrix
         stateOut = state;
-        return dTerrain * 0.72; // Under-relax to prevent missed intersections on steep heightmaps
+        return dTerrain * 0.5;
     } else {
-        matID = 0.0; // Water
+        matID = 0; // Data Swarm
         stateOut = state;
-        return dWater * 0.9;
+        return dSwarm * 0.7;
     }
 }
 
 vec3 calcNormal(in vec3 p) {
-    const float eps = 0.04;
-    const vec2 h = vec2(eps, 0);
-    float dummyMat; vec4 dummyState;
+    const vec2 h = vec2(0.01, 0.0);
+    int dMat; vec4 dState;
     return normalize(vec3(
-        map(p + h.xyy, dummyMat, dummyState) - map(p - h.xyy, dummyMat, dummyState),
-        map(p + h.yxy, dummyMat, dummyState) - map(p - h.yxy, dummyMat, dummyState),
-        map(p + h.yyx, dummyMat, dummyState) - map(p - h.yyx, dummyMat, dummyState)
+        map(p + h.xyy, dMat, dState) - map(p - h.xyy, dMat, dState),
+        map(p + h.yxy, dMat, dState) - map(p - h.yxy, dMat, dState),
+        map(p + h.yyx, dMat, dState) - map(p - h.yyx, dMat, dState)
     ));
 }
 
 float calcShadow(in vec3 ro, in vec3 rd) {
     float res = 1.0;
-    float t = 0.1;
-    float dummyMat; vec4 dummyState;
-    for (int i = 0; i < 40; i++) {
-        float h = map(ro + rd * t, dummyMat, dummyState);
-        res = min(res, 8.0 * h / t);
-        t += clamp(h, 0.05, 0.75);
-        if (h < 0.001 || t > 10.0) break;
+    float t = 0.05;
+    int dMat; vec4 dState;
+    for (int i = 0; i < 32; i++) {
+        float h = map(ro + rd * t, dMat, dState);
+        res = min(res, 12.0 * h / t);
+        t += clamp(h, 0.02, 0.5);
+        if (h < 0.001 || t > 15.0) break;
     }
     return clamp(res, 0.0, 1.0);
 }
 
 void main() {
     vec2 p = (-resolution.xy + 2.0 * gl_FragCoord.xy) / resolution.y;
-
     float safeFx = clamp(fxIntensity, 0.2, 1.6);
-    int safeRaySteps = clamp(raySteps, 32, 160);
+    float contourPower = clamp(contourContrast, 0.0, 1.6);
+    int maxRaySteps = clamp(raySteps, 32, MAX_STEPS);
 
-    // Smooth cinematic camera movement
-    float camTime = time * 0.15 * max(cameraSpeed, 0.05);
-    vec3 ro = vec3(camTime * 5.0, 7.0 + sin(camTime * 0.5) * 1.2, camTime * 4.0);
-    vec3 ta = vec3(ro.x + 4.8, 2.1, ro.z + 4.8 + sin(camTime));
+    float camTime = time * 0.08 * max(cameraSpeed, 0.01);
+    // Lift camera baseline and look slightly down so it never dips below max terrain bounds
+    vec3 ro = vec3(camTime * 4.0, 5.5 + sin(camTime * 0.3) * 1.2, camTime * 3.0);
+    vec3 ta = ro + vec3(cos(camTime * 0.25), -0.6, sin(camTime * 0.25));
 
-    mat3 ca = setCamera(ro, ta, sin(camTime * 0.3) * 0.1);
+    mat3 ca = setCamera(ro, ta, sin(camTime * 0.15) * 0.08);
     vec3 rd = ca * normalize(vec3(p.xy, 2.0));
 
-    // Environment
-    vec3 lightDir = normalize(vec3(0.8, 0.62, -0.4));
-    float sun = pow(max(0.0, dot(rd, lightDir)), 220.0);
-    float skyRise = smoothstep(-0.2, 0.9, rd.y);
-    vec3 skyColor = mix(vec3(0.008, 0.014, 0.032), vec3(0.09, 0.18, 0.31), skyRise);
-    skyColor += vec3(1.00, 0.72, 0.36) * sun * (0.8 + safeFx * 0.8);
-    float aurora = smoothstep(0.74, 0.98, rd.y + 0.12 * sin(p.x * 3.0 + time * 0.22));
-    aurora *= 0.5 + 0.5 * sin(p.x * 9.0 + time * 0.65 + colorShift);
-    skyColor += aurora * vec3(0.08, 0.55, 0.46) * safeFx;
+    vec3 lightDir = normalize(vec3(0.5, 0.8, -0.6));
 
-    // Raymarching
-    float tMax = 50.0;
+    // Deep void cyber-sky
+    vec3 skyColor = vec3(0.01, 0.02, 0.04);
+    float sun = pow(max(0.0, dot(rd, lightDir)), 120.0);
+    skyColor += vec3(0.0, 0.4, 0.8) * sun * safeFx * 0.4;
+
+    // Quantum Surge Flash
+    float surgeInterval = 6.0;
+    float surgeId = floor(time / surgeInterval);
+    float surgeLocalTime = fract(time / surgeInterval) * surgeInterval;
+
+    if (surgeLocalTime > 0.5 && surgeLocalTime < 2.0) {
+        vec2 sTargetUV = getEventTarget(surgeId, 99.0);
+        vec3 sTargetWorld = vec3(sTargetUV.x / 0.06, 0.0, sTargetUV.y / 0.06);
+        vec3 toTarget = normalize(sTargetWorld - ro);
+        float sProj = max(0.0, dot(rd, toTarget));
+        
+        float flash = exp(-pow(surgeLocalTime - 1.0, 2.0) * 80.0);
+        skyColor += vec3(0.0, 1.0, 0.8) * pow(sProj, 250.0) * 6.0 * flash * safeFx;
+        skyColor += vec3(1.0, 0.0, 0.6) * flash * 1.5 * safeFx;
+    }
+
     float t = 0.0;
-    float matID = -1.0;
+    int matID = -1;
     vec4 state = vec4(0.0);
     vec3 volumeGlow = vec3(0.0);
 
-    for (int i = 0; i < 160; i++) {
-        if (i >= safeRaySteps) break;
+    for (int i = 0; i < MAX_STEPS; i++) {
+        if (i >= maxRaySteps) break;
         vec3 pos = ro + rd * t;
-        float currMat; vec4 currState;
+        int currMat; vec4 currState;
         float h = map(pos, currMat, currState);
 
-        // Volumetric bioluminescence accumulation (V concentration)
-        if (currMat == 1.0) {
-            float bio = smoothstep(0.2, 0.8, currState.g);
-            vec3 emColor = mix(vec3(0.0, 1.0, 0.8), vec3(1.0, 0.2, 0.5), currState.r);
-            volumeGlow += emColor * bio * (0.012 + glow * 0.003) * safeFx / (1.0 + abs(h) * 10.0);
+        if (currMat == 0) {
+            float vDense = smoothstep(0.1, 0.8, currState.y);
+            float wHot = smoothstep(0.1, 1.0, currState.w);
+            vec3 swarmColor = mix(vec3(0.0, 0.7, 1.0), vec3(1.0, 0.0, 0.8), wHot);
+            volumeGlow += swarmColor * (vDense + wHot * 0.5) * (0.04 * glow) * safeFx / (1.0 + abs(h) * 6.0);
         }
 
-        if (h < max(0.003, 0.0015 * t) || t > tMax) {
+        if (h < SURF_DIST * (1.0 + t * 0.1) || t > MAX_DIST) {
             matID = currMat;
             state = currState;
             break;
         }
-        t += clamp(h, 0.035, 0.85);
+        t += clamp(h, 0.02, 0.8);
     }
 
     vec3 color = skyColor;
 
-    if (t < tMax) {
+    if (t < MAX_DIST) {
         vec3 pos = ro + rd * t;
         vec3 nor = calcNormal(pos);
 
-        // Lighting
         float occ = clamp(0.5 + 0.5 * nor.y, 0.0, 1.0);
-        float sha = calcShadow(pos + nor * 0.01, lightDir);
+        float sha = calcShadow(pos + nor * 0.02, lightDir);
         float dif = clamp(dot(nor, lightDir), 0.0, 1.0) * sha;
         float sky = clamp(0.5 + 0.5 * nor.y, 0.0, 1.0);
-        float fre = pow(clamp(1.0 + dot(nor, rd), 0.0, 1.0), 2.0);
+        float fre = pow(clamp(1.0 + dot(nor, rd), 0.0, 1.0), 5.0);
 
-        // Materials
         vec3 matColor;
-        if (matID == 1.0) {
-            // Terrain & Organics
-            vec3 rock = vec3(0.1, 0.12, 0.15);
-            vec3 sand = vec3(0.3, 0.25, 0.18);
-            vec3 bio = mix(vec3(0.05, 0.2, 0.15), vec3(0.8, 1.0, 0.9), state.g);
+        vec3 emission = vec3(0.0);
 
-            matColor = mix(rock, sand, smoothstep(0.4, 0.6, nor.y));
-            matColor = mix(matColor, bio, smoothstep(0.1, 0.5, state.g));
+        if (matID == 1) {
+            // Obsidian / Bismuth Matrix Base
+            matColor = vec3(0.03, 0.04, 0.06);
 
-            // Bioluminescence emission on surface
-            vec3 bioGlow = mix(vec3(0.0, 0.9, 0.7), vec3(1.0, 0.13, 0.42), state.r);
-            float pulse = 1.0 + 0.5 * sin(time * 3.0 - pos.x + colorShift * 3.0);
-            matColor += bioGlow * pow(state.g, 3.0) * (1.6 + glow * 0.65) * pulse * safeFx;
-            matColor += vec3(1.0, 0.72, 0.22) * pow(state.a, 2.0) * (1.0 + glow * 0.45) * safeFx;
-            float contour = 1.0 - smoothstep(0.018, 0.045 + contourContrast * 0.03, abs(fract(state.b * 18.0) - 0.5));
-            matColor += contour * vec3(0.08, 0.12, 0.11) * contourContrast;
+            // Bismuth Iridescence
+            vec3 iridescence = 0.5 + 0.5 * cos(6.28318 * (state.z * 1.5 + vec3(0.0, 0.33, 0.67)));
+            matColor += iridescence * 0.15 * sha * safeFx;
+
+            // Compute grid location for glowing circuit traces
+            float gridX = abs(fract(pos.x * 1.5) - 0.5) * 2.0;
+            float gridZ = abs(fract(pos.z * 1.5) - 0.5) * 2.0;
+            float isTrench = 1.0 - smoothstep(0.02, 0.06, min(gridX, gridZ));
+            float edgeGlow = smoothstep(0.08, 0.0, min(gridX, gridZ));
+            float contourLine = 1.0 - smoothstep(
+                0.0,
+                0.055,
+                abs(fract((pos.x * 0.35 + pos.z * 0.45 + pos.y * 1.8) * 5.0) - 0.5)
+            );
+            matColor += vec3(0.0, 0.45, 0.55) * contourLine * contourPower * 0.18;
+
+            // Data Path Emissions
+            vec3 pathGlow = mix(vec3(0.0, 0.8, 1.0), vec3(1.0, 0.2, 0.6), state.w);
+            emission += pathGlow * isTrench * state.y * 3.0 * safeFx;
+            emission += pathGlow * edgeGlow * state.w * 4.0 * safeFx;
+
+            // Shiny matrix reflections
+            float spec = pow(clamp(dot(reflect(rd, nor), lightDir), 0.0, 1.0), 32.0) * sha;
+            emission += vec3(0.5, 0.8, 1.0) * spec * 0.5;
+
         } else {
-            // Water
-            float depth = clamp((1.55 - state.b * 3.7) * 0.5, 0.0, 1.0);
-            vec3 shallow = vec3(0.0, 0.4, 0.5);
-            vec3 deep = vec3(0.0, 0.05, 0.15);
-            matColor = mix(shallow, deep, depth);
-            matColor += vec3(0.05, 0.24, 0.22) * (0.5 + 0.5 * sin(pos.x * 3.0 + pos.z * 2.0 + time * 1.3)) * safeFx;
-
-            // Specular
-            vec3 ref = reflect(rd, nor);
-            float spe = pow(clamp(dot(ref, lightDir), 0.0, 1.0), 32.0) * sha;
-            matColor += vec3(1.0) * spe * 0.5;
-
-            // Reflected bioluminescence
-            matColor += volumeGlow * 0.18;
+            // Surface of the dense Quantum Swarm
+            matColor = mix(vec3(0.0, 0.15, 0.25), vec3(0.6, 0.1, 0.4), state.y);
+            emission += matColor * state.w * 1.5 * safeFx;
+            
+            float spec = pow(clamp(dot(reflect(rd, nor), lightDir), 0.0, 1.0), 8.0) * sha;
+            emission += vec3(0.0, 0.6, 0.8) * spec * 0.4;
+            emission += volumeGlow * 0.3;
         }
 
         vec3 lin = vec3(0.0);
-        lin += 2.15 * dif * vec3(1.0, 0.88, 0.76);
-        lin += 0.55 * sky * vec3(0.20, 0.32, 0.45) * occ;
-        lin += 0.2 * fre * vec3(1.0);
+        lin += 1.2 * dif * vec3(0.8, 0.9, 1.0);
+        lin += 0.6 * sky * vec3(0.1, 0.2, 0.3) * occ;
+        lin += 0.8 * fre * vec3(0.4, 0.8, 1.0) * occ;
 
-        color = matColor * lin;
+        color = matColor * lin + emission;
 
-        // Add atmospheric fog
-        float fog = 1.0 - exp(-0.0016 * t * t);
+        float fog = 1.0 - exp(-0.0015 * t * t);
         color = mix(color, skyColor, fog);
     }
 
-    // Add accumulated volumetric glow
-    color += volumeGlow * (0.8 + safeFx * 0.45);
+    color += volumeGlow * (1.0 + safeFx * 0.5);
 
-    // ACES Tonemapping & Gamma Correction
     color *= exposure;
     color = (color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14);
-    color = pow(color, vec3(1.0 / max(gamma, 0.2)));
+    color = pow(color, vec3(1.0 / max(gamma, 0.1)));
 
-    // Vignetting
     vec2 q = gl_FragCoord.xy / resolution.xy;
-    color *= 0.5 + 0.5 * pow(16.0 * q.x * q.y * (1.0 - q.x) * (1.0 - q.y), 0.25);
+    color *= 0.5 + 0.5 * pow(16.0 * q.x * q.y * (1.0 - q.x) * (1.0 - q.y), 0.2);
 
     fragColor = vec4(color, 1.0);
 }
@@ -411,16 +460,13 @@ void main() {
 }
 """
 
-
 @dataclass(frozen=True)
 class ThermalHoldState:
     lines: Sequence[str]
     log_path: Path
 
-
 def _sanitize_text(line: str) -> str:
     return "".join(ch if ch in FONT_3X5 else "?" for ch in line.upper())
-
 
 def _draw_glyph(
     canvas: np.ndarray,
@@ -441,7 +487,6 @@ def _draw_glyph(
             x1 = min(x0 + scale, width)
             if x1 > 0 and y1 > 0 and x0 < width and y0 < height:
                 canvas[max(y0, 0):y1, max(x0, 0):x1] = color
-
 
 def _draw_text_line(
     canvas: np.ndarray,
@@ -481,13 +526,11 @@ def _draw_text_line(
         _draw_glyph(canvas, FONT_3X5.get(char, FONT_3X5["?"]), cursor, y, scale, color)
         cursor += glyph_width + spacing
 
-
 def _text_width(line: str, scale: int) -> int:
     sanitized = _sanitize_text(line)
     if not sanitized:
         return 0
     return len(sanitized) * (4 * scale) - scale
-
 
 def _fill_rect(
     canvas: np.ndarray,
@@ -505,7 +548,6 @@ def _fill_rect(
     if right > left and bottom > top:
         canvas[top:bottom, left:right] = color
 
-
 def build_hold_frame(lines: Sequence[str], size: Sequence[int]) -> np.ndarray:
     width = max(int(size[0]), 320)
     height = max(int(size[1]), 180)
@@ -514,9 +556,9 @@ def build_hold_frame(lines: Sequence[str], size: Sequence[int]) -> np.ndarray:
     stripe = 0.5 + 0.5 * np.sin(x_gradient * 18.0 + y_gradient * 11.0)
 
     frame = np.zeros((height, width, 3), dtype=np.uint8)
-    frame[..., 0] = np.clip(18.0 + 40.0 * (1.0 - y_gradient) + stripe * 12.0, 0, 255).astype(np.uint8)
-    frame[..., 1] = np.clip(11.0 + 20.0 * (1.0 - y_gradient) + stripe * 8.0, 0, 255).astype(np.uint8)
-    frame[..., 2] = np.clip(10.0 + 16.0 * (1.0 - y_gradient) + stripe * 7.0, 0, 255).astype(np.uint8)
+    frame[..., 0] = np.clip(10.0 + 10.0 * (1.0 - y_gradient) + stripe * 5.0, 0, 255).astype(np.uint8)
+    frame[..., 1] = np.clip(5.0 + 10.0 * (1.0 - y_gradient) + stripe * 5.0, 0, 255).astype(np.uint8)
+    frame[..., 2] = np.clip(30.0 + 20.0 * (1.0 - y_gradient) + stripe * 10.0, 0, 255).astype(np.uint8)
 
     margin = max(24, min(width, height) // 12)
     max_chars = max((len(_sanitize_text(line)) for line in lines), default=1)
@@ -532,16 +574,15 @@ def build_hold_frame(lines: Sequence[str], size: Sequence[int]) -> np.ndarray:
 
     for index, line in enumerate(lines):
         if index == 0:
-            color = (255, 132, 78)
+            color = (255, 50, 100)
         elif index >= len(lines) - 2:
-            color = (204, 214, 220)
+            color = (100, 200, 255)
         else:
-            color = (248, 238, 228)
+            color = (200, 255, 255)
         line_y = start_y + index * (line_height + line_gap)
         _draw_text_line(frame, line, line_y, scale, color)
 
     return frame
-
 
 def build_hud_frame(
     left_lines: Sequence[str],
@@ -589,11 +630,11 @@ def build_hud_frame(
         right_x = margin
         right_y = margin + left_panel_height + gap
 
-    panel_color = (6, 10, 14, 172)
-    line_color = (36, 214, 192, 210)
-    title_color = (238, 252, 247, 245)
-    body_color = (190, 222, 224, 230)
-    warn_color = (255, 186, 87, 238)
+    panel_color = (5, 10, 20, 200)
+    line_color = (0, 255, 180, 210)
+    title_color = (255, 255, 255, 245)
+    body_color = (150, 220, 255, 230)
+    warn_color = (255, 50, 100, 238)
 
     _fill_rect(frame, left_x, left_y, left_x + left_panel_width, left_y + left_panel_height, panel_color)
     _fill_rect(frame, left_x, left_y, left_x + scale, left_y + left_panel_height, line_color)
@@ -625,7 +666,7 @@ def build_hud_frame(
     _fill_rect(frame, right_x, right_y, right_x + scale, right_y + right_panel_height, line_color)
     cursor_y = right_y + pad_y
     for line in right_lines:
-        color = warn_color if "OFFLINE" in line or "OFF" in line else body_color
+        color = warn_color if "OFFLINE" in line or "OFF" in line or "LOST" in line else body_color
         _draw_text_line(
             frame,
             line,
@@ -639,11 +680,8 @@ def build_hud_frame(
 
     return frame
 
-
 class GarageHeatShow(mglw.WindowConfig):
-    """GPU-heavy 3D volumetric world simulation with CPU burners and thermal hold."""
-
-    title = "Garage Life Lab - 3D Bio-World"
+    title = "Garage Life Lab - NEURAL MATRIX CONTAINMENT"
     gl_version = (4, 5)
     resource_dir = Path(__file__).parent
     window_size = (1920, 1080)
@@ -795,20 +833,20 @@ class GarageHeatShow(mglw.WindowConfig):
                 if gpu_temp is None:
                     self.gpu_sensor_failures += 1
                     if self.gpu_sensor_failures >= 3:
-                        reasons.append("GPU SENSOR OFFLINE")
+                        reasons.append("GPU TELEMETRY LOST")
                 else:
                     self.gpu_sensor_failures = 0
                     if gpu_temp > self.args.max_gpu_temp:
                         reasons.append(
-                            f"GPU {gpu_temp:.1f}C OVER LIMIT {self.args.max_gpu_temp:.1f}C"
+                            f"GPU {gpu_temp:.1f}C EXCEEDS LIMIT {self.args.max_gpu_temp:.1f}C"
                         )
 
             if self.args.max_cpu_temp > 0:
                 if cpu_temp is None:
-                    notes.append("CPU SENSOR OFFLINE")
+                    notes.append("CPU TELEMETRY LOST")
                 elif cpu_temp > self.args.max_cpu_temp:
                     reasons.append(
-                        f"CPU {cpu_temp:.1f}C OVER LIMIT {self.args.max_cpu_temp:.1f}C"
+                        f"CPU {cpu_temp:.1f}C EXCEEDS LIMIT {self.args.max_cpu_temp:.1f}C"
                     )
 
             if reasons:
@@ -825,7 +863,7 @@ class GarageHeatShow(mglw.WindowConfig):
         log_path = log_dir / "thermal_events.log"
         last_event_path = log_dir / "last_thermal_hold.txt"
 
-        log_lines = [f"[{timestamp}] THERMAL HOLD", *reasons]
+        log_lines = [f"[{timestamp}] CONTAINMENT BREACH AVERTED: THERMAL HOLD", *reasons]
         if notes:
             log_lines.extend(notes)
         gpu_temp = self.latest_temperatures.get("GPU")
@@ -835,7 +873,7 @@ class GarageHeatShow(mglw.WindowConfig):
         if cpu_temp is not None:
             sensor_name = self.cpu_sensor_name or "CPU"
             log_lines.append(f"LAST {sensor_name.upper()} TEMP {cpu_temp:.1f}C")
-        log_lines.append("LOADS STOPPED TO COOL SYSTEM")
+        log_lines.append("QUANTUM LOADS HALTED TO COOL SYSTEM")
         log_lines.append("")
 
         with log_path.open("a", encoding="utf-8") as handle:
@@ -879,10 +917,10 @@ class GarageHeatShow(mglw.WindowConfig):
         log_path = self._write_thermal_logs(reasons, notes)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         hold_lines = [
-            "THERMAL HOLD",
+            "CONTAINMENT BREACH AVERTED",
             *reasons,
             *notes,
-            "LOADS STOPPED TO COOL SYSTEM",
+            "QUANTUM LOADS HALTED TO COOL SYSTEM",
             timestamp,
             "SEE LOGS THERMAL EVENTS LOG",
             "PRESS ESC TO EXIT",
@@ -907,7 +945,7 @@ class GarageHeatShow(mglw.WindowConfig):
         if cpu_temp is not None:
             parts.append(f"CPU {cpu_temp:.0f}C")
         elif self.args.max_cpu_temp > 0 and not self.args.no_thermal_hold:
-            parts.append("CPU SENSOR OFFLINE")
+            parts.append("CPU TELEMETRY LOST")
         if parts:
             self.wnd.title = f"{self.base_title} | " + " | ".join(parts)
         else:
@@ -924,7 +962,7 @@ class GarageHeatShow(mglw.WindowConfig):
         if limit <= 0:
             return f"{label} HOLD OFF"
         if value is None:
-            return f"{label} SENSOR OFFLINE"
+            return f"{label} TELEMETRY LOST"
         return f"{label} {value:.0f}C LIMIT {limit:.0f}C"
 
     def _hud_lines(self) -> Sequence[Sequence[str]]:
@@ -937,11 +975,11 @@ class GarageHeatShow(mglw.WindowConfig):
             cpu_temp = self.latest_temperatures.get("CPU")
         left_lines = [
             "GARAGE LIFE LAB",
-            "3D VOLUMETRIC STRESS",
-            f"{width}X{height} MAP {tiles_x}X{tiles_y}",
-            f"SIM STEP {self.args.substeps} RAYMARCH {self.args.ray_steps}",
-            f"FX {self.args.fx_intensity:.1f} CAM {self.args.camera_speed:.1f}",
-            f"CPU WORKERS {self.args.cpu_workers}",
+            "NEURAL MATRIX CONTAINMENT",
+            f"QUANTUM GRID {width}X{height} NODES {tiles_x}X{tiles_y}",
+            f"SIM CYCLE {self.args.substeps} TENSOR {self.args.ray_steps}",
+            f"OVERRIDE FX {self.args.fx_intensity:.1f} CAM {self.args.camera_speed:.1f}",
+            f"ANNEALING WORKERS {self.args.cpu_workers}",
         ]
         right_lines = [
             self._temperature_line("GPU", gpu_temp, self.args.max_gpu_temp),
@@ -1014,121 +1052,28 @@ class GarageHeatShow(mglw.WindowConfig):
         tiles_x = max(1, int(np.ceil(width_px / tile_size)))
         tiles_y = max(1, int(np.ceil(height_px / tile_size)))
 
-        rng = np.random.default_rng(2026)
-        tile_y, tile_x = np.meshgrid(
-            np.arange(tiles_y, dtype=np.float32),
-            np.arange(tiles_x, dtype=np.float32),
-            indexing="ij",
-        )
-        x_norm = tile_x / max(tiles_x - 1, 1)
-        y_norm = tile_y / max(tiles_y - 1, 1)
+        rng = np.random.default_rng(4242)
 
-        height = (
-            0.45
-            + 0.15 * np.sin(x_norm * 7.3 + 0.9)
-            + 0.11 * np.cos(y_norm * 5.7 - 1.2)
-            + 0.08 * np.sin((x_norm + y_norm) * 11.0)
-            + 0.06 * np.cos((x_norm - y_norm) * 13.0)
-            + rng.standard_normal((tiles_y, tiles_x), dtype=np.float32) * 0.025
-        )
+        reaction_u = np.ones((tiles_y, tiles_x), dtype=np.float32)
+        reaction_v = np.zeros((tiles_y, tiles_x), dtype=np.float32)
 
-        continent_count = max(5, (tiles_x * tiles_y) // 4000)
-        for _ in range(continent_count):
-            cx = rng.uniform(0.0, tiles_x)
-            cy = rng.uniform(0.0, tiles_y)
-            rx = rng.uniform(max(5.0, tiles_x * 0.04), max(12.0, tiles_x * 0.18))
-            ry = rng.uniform(max(5.0, tiles_y * 0.04), max(12.0, tiles_y * 0.18))
-            distance = ((tile_x - cx) / rx) ** 2 + ((tile_y - cy) / ry) ** 2
-            lift = np.clip(1.0 - distance, 0.0, 1.0)
-            height += lift * rng.uniform(0.10, 0.24)
+        seed_count = max(5, (tiles_x * tiles_y) // 300)
+        for _ in range(seed_count):
+            cx = rng.integers(0, tiles_x)
+            cy = rng.integers(0, tiles_y)
+            radius = rng.integers(2, 8)
+            y, x = np.ogrid[-cy:tiles_y-cy, -cx:tiles_x-cx]
+            mask = x*x + y*y <= radius*radius
+            reaction_v[mask] = 1.0
+            reaction_u[mask] = 0.5
 
-        trench_count = max(4, continent_count // 2)
-        for _ in range(trench_count):
-            cx = rng.uniform(0.0, tiles_x)
-            cy = rng.uniform(0.0, tiles_y)
-            rx = rng.uniform(max(6.0, tiles_x * 0.05), max(14.0, tiles_x * 0.16))
-            ry = rng.uniform(max(6.0, tiles_y * 0.05), max(14.0, tiles_y * 0.16))
-            distance = ((tile_x - cx) / rx) ** 2 + ((tile_y - cy) / ry) ** 2
-            carve = np.clip(1.0 - distance, 0.0, 1.0)
-            height -= carve * rng.uniform(0.08, 0.18)
+        height = rng.uniform(0.0, 0.2, size=(tiles_y, tiles_x)).astype(np.float32)
+        heat = np.zeros((tiles_y, tiles_x), dtype=np.float32)
 
-        ridge_bands = np.sin(x_norm * 21.0 + np.cos(y_norm * 9.0) * 2.3)
-        height += np.clip(ridge_bands - 0.45, 0.0, 1.0) * 0.08
-        height = np.clip(height, 0.0, 1.0)
-
-        sea_level = 0.46
-        ocean = (height < sea_level).astype(np.float32)
-        coast = np.clip(1.0 - np.abs(height - sea_level) / 0.07, 0.0, 1.0)
-        latitude = 1.0 - np.abs(y_norm * 2.0 - 1.0)
-
-        moisture = np.clip(
-            0.16
-            + ocean * 0.52
-            + coast * 0.22
-            + latitude * 0.12
-            + 0.08 * np.sin(x_norm * 9.0 - y_norm * 6.0)
-            + rng.standard_normal((tiles_y, tiles_x), dtype=np.float32) * 0.03,
-            0.0,
-            1.0,
-        )
-
-        biomass = np.clip(
-            (1.0 - ocean)
-            * (
-                0.06
-                + moisture * 0.62
-                + latitude * 0.16
-                - np.clip(height - 0.72, 0.0, 1.0) * 0.50
-            ),
-            0.0,
-            1.0,
-        )
-
-        settlement = np.zeros((tiles_y, tiles_x), dtype=np.float32)
-        candidate_mask = (
-            (ocean < 0.5)
-            & (coast > 0.35)
-            & (biomass > 0.28)
-            & (height < 0.74)
-        )
-        candidates = np.argwhere(candidate_mask)
-        if len(candidates) > 0:
-            city_count = min(max(8, (tiles_x * tiles_y) // 1800), len(candidates))
-            city_indices = rng.choice(len(candidates), size=city_count, replace=False)
-            for candidate_index in city_indices:
-                cy, cx = candidates[candidate_index]
-                radius = int(rng.integers(1, 3))
-                y0 = max(cy - radius, 0)
-                y1 = min(cy + radius + 1, tiles_y)
-                x0 = max(cx - radius, 0)
-                x1 = min(cx + radius + 1, tiles_x)
-                patch_y, patch_x = np.meshgrid(
-                    np.arange(y0, y1, dtype=np.float32),
-                    np.arange(x0, x1, dtype=np.float32),
-                    indexing="ij",
-                )
-                distance = np.sqrt((patch_x - cx) ** 2 + (patch_y - cy) ** 2)
-                influence = np.clip(1.0 - distance / max(radius + 0.5, 1.0), 0.0, 1.0)
-                settlement[y0:y1, x0:x1] = np.maximum(
-                    settlement[y0:y1, x0:x1],
-                    influence * rng.uniform(0.35, 0.78),
-                )
-
-        reaction_u = np.clip(1.0 - biomass * 0.36 + moisture * 0.08, 0.0, 1.0)
-        reaction_v = np.clip(biomass * 0.82 + moisture * 0.12, 0.0, 1.0)
-
-        tile_field = np.stack(
-            [
-                reaction_u.astype(np.float32),
-                reaction_v.astype(np.float32),
-                height.astype(np.float32),
-                settlement.astype(np.float32),
-            ],
-            axis=-1,
-        )
-
+        tile_field = np.stack([reaction_u, reaction_v, height, heat], axis=-1)
         field = np.repeat(np.repeat(tile_field, tile_size, axis=0), tile_size, axis=1)
         field = field[:height_px, :width_px].copy()
+        
         for tex in self.state_textures:
             tex.write(field.tobytes())
 
@@ -1137,8 +1082,6 @@ class GarageHeatShow(mglw.WindowConfig):
         self.update_program["diffV"].value = self.args.diff_v
         self.update_program["dt"].value = self.args.time_step
         self.update_program["laplaceScale"].value = self.args.laplace_scale
-        self.update_program["noiseStrength"].value = self.args.noise_strength
-        self.update_program["parameterDrift"].value = self.args.param_drift
 
         self.display_program["exposure"].value = self.args.exposure
         self.display_program["glow"].value = self.args.glow
@@ -1153,7 +1096,7 @@ class GarageHeatShow(mglw.WindowConfig):
             thread = threading.Thread(
                 target=self._cpu_burner,
                 args=(worker_id,),
-                name=f"cpu-burner-{worker_id}",
+                name=f"quantum-annealer-{worker_id}",
                 daemon=True,
             )
             thread.start()
@@ -1222,9 +1165,6 @@ class GarageHeatShow(mglw.WindowConfig):
         self.ctx.viewport = (0, 0, *self.wnd.buffer_size)
         self.state_textures[self.active_state].use(location=0)
         self.display_program["time"].value = animated_time
-        self.display_program["colorShift"].value = (
-            animated_time * self.args.color_shift_speed
-        ) % 10.0
         self.quad.render(self.display_program)
         self._render_hud()
 
@@ -1242,7 +1182,7 @@ class GarageHeatShow(mglw.WindowConfig):
         self.quad.render(self.message_program)
         self.ctx.disable(moderngl.BLEND)
 
-    def resize(self, width: int, height: int):  # type: ignore[override]
+    def resize(self, width: int, height: int):
         if self.thermal_hold is not None:
             self._build_hold_texture(self.thermal_hold.lines)
             return
@@ -1270,30 +1210,27 @@ class GarageHeatShow(mglw.WindowConfig):
         super().destroy()
 
     @classmethod
-    def add_arguments(cls, parser) -> None:  # type: ignore[override]
+    def add_arguments(cls, parser) -> None:
         parser.add_argument("--width", type=int, default=cls.window_size[0], help="Render width")
         parser.add_argument("--height", type=int, default=cls.window_size[1], help="Render height")
-        parser.add_argument("--feed", type=float, default=0.035, help="Gray-Scott base feed rate")
-        parser.add_argument("--kill", type=float, default=0.060, help="Gray-Scott base kill rate")
-        parser.add_argument("--diff-u", type=float, default=0.16, help="Diffusion rate for U")
-        parser.add_argument("--diff-v", type=float, default=0.08, help="Diffusion rate for V")
+        parser.add_argument("--feed", type=float, default=0.035, help="Neural matrix base feed rate")
+        parser.add_argument("--kill", type=float, default=0.060, help="Neural matrix base kill rate")
+        parser.add_argument("--diff-u", type=float, default=0.16, help="Diffusion rate for Substrate")
+        parser.add_argument("--diff-v", type=float, default=0.08, help="Diffusion rate for Active Nodes")
         parser.add_argument("--time-step", dest="time_step", type=float, default=1.0, help="Simulation time step")
         parser.add_argument("--substeps", type=int, default=8, help="Simulation steps per frame")
         parser.add_argument("--laplace-scale", type=float, default=1.0, help="Global laplacian multiplier")
-        parser.add_argument("--noise-strength", type=float, default=0.015, help="Stochastic noise injected each step")
-        parser.add_argument("--param-drift", type=float, default=0.004, help="Sinusoidal feed/kill drift amplitude")
         parser.add_argument("--anim-speed", type=float, default=1.0, help="Global animation multiplier")
-        parser.add_argument("--color-shift-speed", type=float, default=0.05, help="Palette cycle speed")
-        parser.add_argument("--exposure", type=float, default=1.4, help="Display exposure")
+        parser.add_argument("--exposure", type=float, default=1.5, help="Display exposure")
         parser.add_argument("--glow", type=float, default=1.1, help="Display glow factor")
         parser.add_argument("--gamma", type=float, default=1.2, help="Display gamma correction")
         parser.add_argument("--contour-contrast", type=float, default=0.75, help="Contour emphasis strength")
-        parser.add_argument("--ray-steps", type=int, default=96, help="Maximum raymarch steps per pixel")
-        parser.add_argument("--fx-intensity", type=float, default=1.0, help="Cinematic glow, aurora, terrain, and material intensity")
+        parser.add_argument("--ray-steps", type=int, default=120, help="Maximum raymarch steps per pixel")
+        parser.add_argument("--fx-intensity", type=float, default=1.2, help="Matrix bloom and structural intensity")
         parser.add_argument("--camera-speed", type=float, default=1.0, help="Cinematic camera speed multiplier")
-        parser.add_argument("--cpu-workers", type=int, default=0, help="CPU burner thread count")
-        parser.add_argument("--cpu-matrix", type=int, default=896, help="CPU burner matrix size")
-        parser.add_argument("--tile-size", type=int, default=12, help="Base resolution downscale factor for fluid sim")
+        parser.add_argument("--cpu-workers", type=int, default=0, help="Quantum annealing burner thread count")
+        parser.add_argument("--cpu-matrix", type=int, default=896, help="Quantum annealing burner matrix size")
+        parser.add_argument("--tile-size", type=int, default=10, help="Base resolution downscale factor for fluid sim")
         parser.add_argument("--max-cpu-temp", type=float, default=75.0, help="Hold the show if the CPU exceeds this temperature in Celsius")
         parser.add_argument("--max-gpu-temp", type=float, default=70.0, help="Hold the show if the GPU exceeds this temperature in Celsius")
         parser.add_argument("--thermal-poll-seconds", type=float, default=5.0, help="Sensor poll interval in seconds")
@@ -1301,10 +1238,8 @@ class GarageHeatShow(mglw.WindowConfig):
         parser.add_argument("--no-hud", action="store_true", help="Hide the in-frame show status overlay")
         parser.add_argument("--hud-scale", type=float, default=1.0, help="Scale the in-frame show status overlay")
 
-
 def main() -> None:
     mglw.run_window_config(GarageHeatShow)
-
 
 if __name__ == "__main__":
     main()
