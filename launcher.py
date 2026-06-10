@@ -268,6 +268,9 @@ class GarageLifeLauncher:
             ("exposure", "Exposure"),
             ("gamma", "Gamma"),
             ("contour_contrast", "Contours"),
+            ("ray_steps", "Ray steps"),
+            ("fx_intensity", "FX"),
+            ("camera_speed", "Camera"),
             ("max_gpu_temp", "GPU C"),
             ("max_cpu_temp", "CPU C"),
         ]
@@ -331,8 +334,8 @@ class GarageLifeLauncher:
             return preset
 
         values: dict[str, object] = {}
-        integer_fields = {"width", "height", "tile_size", "substeps", "cpu_workers", "cpu_matrix"}
-        float_fields = {"glow", "exposure", "gamma", "contour_contrast", "max_gpu_temp", "max_cpu_temp"}
+        integer_fields = {"width", "height", "tile_size", "substeps", "ray_steps", "cpu_workers", "cpu_matrix"}
+        float_fields = {"glow", "exposure", "gamma", "contour_contrast", "fx_intensity", "camera_speed", "max_gpu_temp", "max_cpu_temp"}
         for key in integer_fields:
             values[key] = _safe_int(self.fields[key].get(), getattr(preset, key), minimum=0)
         for key in float_fields:
@@ -341,14 +344,18 @@ class GarageLifeLauncher:
         values["height"] = max(360, int(values["height"]))
         values["tile_size"] = max(2, int(values["tile_size"]))
         values["substeps"] = max(1, int(values["substeps"]))
+        values["ray_steps"] = max(32, min(160, int(values["ray_steps"])))
+        values["fx_intensity"] = max(0.2, min(1.6, float(values["fx_intensity"])))
+        values["camera_speed"] = max(0.05, min(2.0, float(values["camera_speed"])))
         return replace(preset, **values)
 
     def _refresh_command(self) -> None:
         preset = self._current_preset()
-        heat_score = preset.substeps * max(1, 20 - min(18, preset.tile_size)) + preset.cpu_workers * 12
+        heat_score = preset.substeps * max(1, 20 - min(18, preset.tile_size)) + preset.ray_steps * 2 + preset.cpu_workers * 12
         self.summary_var.set(
             f"{preset.short_name}: {preset.width}x{preset.height}, tile {preset.tile_size}, "
-            f"{preset.substeps} GPU steps/frame, {preset.cpu_workers} CPU workers. "
+            f"{preset.substeps} sim steps, {preset.ray_steps} ray steps, FX {preset.fx_intensity:.1f}, "
+            f"{preset.cpu_workers} CPU workers. "
             f"Thermal hold: GPU {preset.max_gpu_temp:.0f}C, CPU {preset.max_cpu_temp:.0f}C. "
             f"Estimated load: {_load_label(heat_score)}."
         )
@@ -372,13 +379,15 @@ class GarageLifeLauncher:
         preset = self._current_preset()
         self.preview_tick += 1
         cell = max(8, min(26, preset.tile_size + 3))
-        palette = ["#0c2a36", "#14505c", "#1c7358", "#6e8a3b", "#b98d45", "#d7c184", "#d9f7ff"]
+        palette = ["#06101f", "#0b3143", "#106569", "#1db38b", "#80e0b5", "#ff7ba5", "#ffe083"]
         for y in range(0, height, cell):
             for x in range(0, width, cell):
                 wave = (x // cell * 3 + y // cell * 5 + self.preview_tick) % len(palette)
                 color = palette[wave]
                 if (x + y + self.preview_tick * cell) % (cell * 7) == 0:
                     color = "#e7fff5"
+                if preset.fx_intensity > 1.0 and (x * 3 + y + self.preview_tick * 11) % (cell * 11) == 0:
+                    color = "#ff70b6"
                 self.preview.create_rectangle(x, y, x + cell + 1, y + cell + 1, fill=color, outline="")
         self.preview.create_rectangle(0, 0, width, height, fill="#020409", stipple="gray25", outline="")
         self.preview.create_text(
@@ -395,7 +404,7 @@ class GarageLifeLauncher:
             anchor="nw",
             fill="#9fb2c7",
             font=("Segoe UI", 10),
-            text=f"{preset.width}x{preset.height}  tile {preset.tile_size}  steps {preset.substeps}",
+            text=f"{preset.width}x{preset.height}  sim {preset.substeps}  rays {preset.ray_steps}  fx {preset.fx_intensity:.1f}",
         )
         self.preview.create_text(
             20,

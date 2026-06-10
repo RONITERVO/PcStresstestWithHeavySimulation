@@ -1,9 +1,9 @@
 # Garage Life Lab
 
-Garage Life Lab is a long-run tile world for a large garage display. It keeps the machine hot with a full-screen GPU simulation plus optional CPU burners, but the screen now reads as a world map instead of abstract noise: oceans, coasts, forests, deserts, mountains, cities, clouds, contour bands, a day-night cycle, and an in-frame status overlay.
+Garage Life Lab is a long-run 3D bio-world for a large garage display. It keeps the machine hot with a full-screen GPU simulation plus optional CPU burners, but the screen now reads as a cinematic alien landscape instead of abstract noise: glowing biomass, terrain extrusion, reflective water, city energy, aurora sky, atmospheric fog, thermal status, and an in-frame show overlay.
 
 ## Highlights
-- Tile-based world simulation designed to stay readable from across a garage.
+- 3D raymarched bio-world designed to stay readable from across a garage.
 - In-frame show HUD with resolution, tile grid, worker load, FPS, uptime, temperature limits, and thermal hold state.
 - Full-screen GPU workload retained for sustained heat.
 - Optional NumPy CPU burners for extra room heat.
@@ -34,14 +34,14 @@ The first screen detects the PC, recommends a preset, shows a live preview of th
 
 The app keeps developer-level control under **Advanced controls**, where every generated parameter can still be edited before launch.
 
-Preset design targets the broad Windows gaming-PC middle first: 1080p screens, 16-32 GB RAM, 6-8 CPU cores, and DirectX 12-class GPUs. The launcher auto-selects a tier from GPU class, CPU thread count, RAM, and screen size, then shows the exact generated launch before starting.
+Preset design targets the broad Windows gaming-PC middle first: 1080p screens, 16-32 GB RAM, 6-8 CPU cores, and DirectX 12-class GPUs. The launcher auto-selects a tier from GPU class, CPU thread count, RAM, and screen size, then shows the exact generated launch before starting. Higher tiers raise simulation steps, raymarch steps, cinematic FX intensity, and CPU burner load.
 
 | Tier | Typical PC | What changes |
 | --- | --- | --- |
-| Low | Small GPU, laptop, or first launch | 720p, larger tiles, low CPU workers |
-| Medium | Mainstream 1080p desktop | 1080p, balanced detail and heat |
-| High | Strong discrete GPU | More GPU steps, smaller tiles, more CPU work |
-| Ultra | RTX 5070/4080/4090 class | Aggressive detail, heat, and CPU burn |
+| Low | Small GPU, laptop, or first launch | 720p, 48 ray steps, low CPU workers |
+| Medium | Mainstream 1080p desktop | 1080p, 72 ray steps, balanced cinematic FX |
+| High | Strong discrete GPU | More sim steps, 104 ray steps, stronger glow |
+| Ultra | RTX 5070/4080/4090 class | 140 ray steps, max FX, aggressive heat |
 
 ## Setup From Source
 ```powershell
@@ -70,7 +70,7 @@ dist\GarageLifeLab\GarageLifeLab.exe
 Advanced users can still run the simulation directly:
 
 ```powershell
-.\.venv\Scripts\python main.py --width 1920 --height 1080 --tile-size 12 --substeps 24 --cpu-workers 16 --cpu-matrix 1024 --glow 1.3 --exposure 1.45
+.\.venv\Scripts\python main.py --width 1920 --height 1080 --tile-size 10 --substeps 32 --ray-steps 104 --fx-intensity 1.1 --cpu-workers 16 --cpu-matrix 1024 --glow 1.32 --exposure 1.45
 ```
 
 ## Lower Detail Test
@@ -87,6 +87,9 @@ Advanced users can still run the simulation directly:
 ## Useful Flags
 - `--tile-size 12`
 - `--substeps 24`
+- `--ray-steps 104`
+- `--fx-intensity 1.0`
+- `--camera-speed 1.0`
 - `--cpu-workers 16`
 - `--cpu-matrix 1024`
 - `--max-cpu-temp 75`
