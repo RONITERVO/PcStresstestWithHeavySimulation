@@ -1,12 +1,22 @@
 @echo off
-REM Launches Garage Life Lab with the tile-world 1080p preset
+REM Launches the Garage Life Lab Windows UI
 setlocal
 cd /d %~dp0
 
-if exist .venv\Scripts\python.exe (
-    set PYTHON=.venv\Scripts\python.exe
-) else (
-    set PYTHON=python
+if exist .venv\Scripts\pythonw.exe (
+    start "" .venv\Scripts\pythonw.exe launcher.py
+    exit /b
 )
 
-%PYTHON% main.py -wnd glfw --width 1920 --height 1080 --tile-size 12 --substeps 24 --cpu-workers 16 --cpu-matrix 1024 --glow 1.3 --exposure 1.45
+if exist .venv\Scripts\python.exe (
+    start "" .venv\Scripts\python.exe launcher.py
+    exit /b
+)
+
+where pyw.exe >nul 2>nul
+if %errorlevel%==0 (
+    start "" pyw -3.9 launcher.py
+    exit /b
+)
+
+start "" py -3.9 launcher.py
