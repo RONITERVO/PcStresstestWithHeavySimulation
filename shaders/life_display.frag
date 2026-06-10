@@ -161,8 +161,15 @@ void main() {
     float clouds = smoothstep(0.66, 0.92, humidity * 0.72 + cloudWave * 0.28) * (0.35 + 0.65 * land);
     color = mix(color, vec3(0.92, 0.95, 0.97), clouds * 0.32);
 
+    float shoreSparkle = shore
+        * (0.45 + 0.55 * sin(local.x * 9.0 + local.y * 5.0 + time * 1.8 + tileIndex.x * 0.17))
+        * (0.35 + globalDay * 0.65);
+    color += shoreSparkle * vec3(0.11, 0.18, 0.16);
+
     float nightLights = city * (1.0 - globalDay) * (0.45 + glow * 0.55);
     color += nightLights * vec3(1.00, 0.76, 0.35);
+    float cityPulse = city * (0.55 + 0.45 * sin(time * 2.0 + tileIndex.x * 0.8 + tileIndex.y * 0.4));
+    color += cityPulse * vec3(0.08, 0.06, 0.03) * (0.35 + glow * 0.25);
 
     float contourBand = abs(fract(center.x * 14.0) - 0.5);
     float contour = 1.0 - smoothstep(0.14, 0.22 + contourContrast * 0.12, contourBand);
@@ -171,6 +178,12 @@ void main() {
     float edge = min(min(local.x, local.y), min(1.0 - local.x, 1.0 - local.y));
     float gridLine = 1.0 - smoothstep(0.03, 0.10, edge);
     color = mix(color, color * 0.62, gridLine * 0.55);
+
+    vec2 screenUv = gl_FragCoord.xy / resolution;
+    float frameDistance = length((screenUv - 0.5) * vec2(resolution.x / resolution.y, 1.0));
+    float centerLift = 1.0 - smoothstep(0.34, 0.78, frameDistance);
+    color *= mix(0.78, 1.06, centerLift);
+    color += vec3(0.015, 0.020, 0.024) * (1.0 - centerLift);
 
     color = vec3(1.0) - exp(-color * exposure);
     color = pow(color, vec3(1.0 / gamma));

@@ -1,9 +1,10 @@
 # Garage Life Lab
 
-Garage Life Lab is a long-run tile world for a large garage display. It keeps the machine hot with a full-screen GPU simulation plus optional CPU burners, but the screen now reads as a world map instead of abstract noise: oceans, coasts, forests, deserts, mountains, cities, clouds, contour bands, and a day-night cycle.
+Garage Life Lab is a long-run tile world for a large garage display. It keeps the machine hot with a full-screen GPU simulation plus optional CPU burners, but the screen now reads as a world map instead of abstract noise: oceans, coasts, forests, deserts, mountains, cities, clouds, contour bands, a day-night cycle, and an in-frame status overlay.
 
 ## Highlights
 - Tile-based world simulation designed to stay readable from across a garage.
+- In-frame show HUD with resolution, tile grid, worker load, FPS, uptime, temperature limits, and thermal hold state.
 - Full-screen GPU workload retained for sustained heat.
 - Optional NumPy CPU burners for extra room heat.
 - Thermal watchdog with on-screen hold state and persistent logs.
@@ -47,6 +48,8 @@ pip install -r requirements.txt
 - `--max-gpu-temp 70`
 - `--thermal-poll-seconds 5`
 - `--no-thermal-hold`
+- `--no-hud`
+- `--hud-scale 1.0`
 
 ## Notes
 - Smaller `--tile-size` means more visible detail per screen, larger values mean chunkier cells that read better from farther away.
