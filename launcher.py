@@ -25,6 +25,7 @@ from garage_life_presets import (
 APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
 SOURCE_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 LOG_DIR = SOURCE_DIR / "logs"
+REQUIRED_IMPORT_CHECK = "import moderngl, moderngl_window, glfw, numpy, pyrr"
 
 
 class GarageLifeLauncher:
@@ -42,6 +43,7 @@ class GarageLifeLauncher:
             python_executable=sys.executable,
         )
         self.presets = build_presets(self.hw)
+        self.python_command = select_python_command()
         self.selected_key = tk.StringVar(value=recommended_preset_key(self.hw))
         self.status_var = tk.StringVar(value="Ready")
         self.advanced_open = tk.BooleanVar(value=False)
@@ -291,10 +293,14 @@ class GarageLifeLauncher:
         gpu_memory = ""
         if self.hw.gpu.memory_mb:
             gpu_memory = f" {self.hw.gpu.memory_mb // 1024} GB"
+        python_line = "Bundled runtime" if getattr(sys, "frozen", False) else "Python: " + (
+            " ".join(self.python_command) if self.python_command else "setup needed"
+        )
         return (
             f"{self.hw.gpu.name}{gpu_memory}\n"
             f"{self.hw.cpu_name}\n"
-            f"{self.hw.logical_cpus} threads, {self.hw.ram_gb} GB RAM"
+            f"{self.hw.logical_cpus} threads, {self.hw.ram_gb} GB RAM\n"
+            f"{python_line}"
         )
 
     def _selected_base_preset(self) -> LaunchPreset:
@@ -346,10 +352,14 @@ class GarageLifeLauncher:
             f"Thermal hold: GPU {preset.max_gpu_temp:.0f}C, CPU {preset.max_cpu_temp:.0f}C. "
             f"Estimated load: {_load_label(heat_score)}."
         )
-        self.command_var.set(preset.command_preview())
+        try:
+            command_preview = display_command(launch_command(preset, self.python_command))
+        except RuntimeError as exc:
+            command_preview = str(exc)
+        self.command_var.set(command_preview)
         self.command_box.configure(state="normal")
         self.command_box.delete("1.0", "end")
-        self.command_box.insert("1.0", preset.command_preview())
+        self.command_box.insert("1.0", command_preview)
         self.command_box.configure(state="disabled")
 
     def _draw_preview(self) -> None:
@@ -406,9 +416,15 @@ class GarageLifeLauncher:
         LOG_DIR.mkdir(exist_ok=True)
         self.log_path = LOG_DIR / "launcher-last-run.log"
         log_file = self.log_path.open("w", encoding="utf-8")
-        command = launch_command(preset)
+        try:
+            command = launch_command(preset, self.python_command)
+        except RuntimeError as exc:
+            log_file.write(str(exc) + "\n")
+            log_file.close()
+            self.status_var.set(str(exc))
+            return
         log_file.write(f"Started {time.ctime()}\n")
-        log_file.write("Command: " + " ".join(command) + "\n\n")
+        log_file.write("Command: " + display_command(command) + "\n\n")
         log_file.flush()
         try:
             self.process = subprocess.Popen(
@@ -478,15 +494,100 @@ def _load_label(score: int) -> str:
     return "low"
 
 
-def launch_command(preset: LaunchPreset) -> list[str]:
+def display_command(command: list[str]) -> str:
+    return " ".join(_quote_process_arg(part) for part in command)
+
+
+def _quote_process_arg(part: str) -> str:
+    if not part:
+        return '""'
+    if any(ch.isspace() for ch in part):
+        return '"' + part.replace('"', '\\"') + '"'
+    return part
+
+
+def select_python_command() -> Optional[list[str]]:
+    if getattr(sys, "frozen", False):
+        return [sys.executable]
+
+    candidates: list[list[str]] = []
+    venv_scripts = SOURCE_DIR / ".venv" / "Scripts"
+    candidates.extend([
+        [str(venv_scripts / "pythonw.exe")],
+        [str(venv_scripts / "python.exe")],
+    ])
+
+    current = Path(sys.executable)
+    if current.exists():
+        if current.name.lower() == "python.exe":
+            pythonw = current.with_name("pythonw.exe")
+            candidates.append([str(pythonw)])
+        candidates.append([str(current)])
+
+    candidates.extend([
+        ["pyw", "-3.9"],
+        ["py", "-3.9"],
+        ["pythonw"],
+        ["python"],
+    ])
+
+    seen: set[tuple[str, ...]] = set()
+    for candidate in candidates:
+        key = tuple(part.lower() for part in candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        if python_can_run_simulation(candidate):
+            return candidate
+    return None
+
+
+def python_can_run_simulation(command: list[str]) -> bool:
+    if not _command_exists(command):
+        return False
+    try:
+        result = subprocess.run(
+            command + ["-c", REQUIRED_IMPORT_CHECK],
+            cwd=str(APP_DIR),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=8.0,
+            creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0,
+            check=False,
+        )
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        return False
+    return result is not None and result.returncode == 0
+
+
+def _command_exists(command: list[str]) -> bool:
+    first = command[0]
+    if "\\" in first or "/" in first:
+        return Path(first).exists()
+    try:
+        result = subprocess.run(
+            ["where" if os.name == "nt" else "which", first],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=CREATE_NO_WINDOW if os.name == "nt" else 0,
+            check=False,
+        )
+    except (FileNotFoundError, OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def launch_command(preset: LaunchPreset, python_command: Optional[list[str]] = None) -> list[str]:
     if getattr(sys, "frozen", False):
         return [sys.executable, "--run-sim"] + preset.args()
 
-    python_executable = sys.executable
-    pythonw = Path(python_executable).with_name("pythonw.exe")
-    if os.name == "nt" and pythonw.exists():
-        python_executable = str(pythonw)
-    return [python_executable, str(APP_DIR / "main.py")] + preset.args()
+    command = python_command or select_python_command()
+    if not command:
+        raise RuntimeError(
+            "Garage Life Lab needs Python 3.9 with the graphics packages installed. "
+            "Run build_windows_app.ps1 or install requirements into .venv."
+        )
+    return command + [str(APP_DIR / "main.py")] + preset.args()
 
 
 def run_simulation(argv: list[str]) -> None:
