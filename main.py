@@ -135,12 +135,25 @@ def _draw_text_line(
     scale: int,
     color: Sequence[int],
     shadow: bool = True,
+    x: Optional[int] = None,
+    align: str = "center",
 ) -> None:
     sanitized = _sanitize_text(line)
     glyph_width = 3 * scale
     spacing = scale
     line_width = max(0, len(sanitized) * (glyph_width + spacing) - spacing)
-    x = max((canvas.shape[1] - line_width) // 2, scale * 3)
+    if x is None:
+        if align == "right":
+            x = canvas.shape[1] - line_width - scale * 3
+        elif align == "left":
+            x = scale * 3
+        else:
+            x = (canvas.shape[1] - line_width) // 2
+    elif align == "right":
+        x -= line_width
+    elif align == "center":
+        x -= line_width // 2
+    x = max(int(x), scale * 2)
     if shadow:
         shadow_offset = max(1, scale // 3)
         shadow_color = np.clip(np.array(color, dtype=np.int16) // 4, 0, 255).astype(np.uint8)
@@ -152,6 +165,30 @@ def _draw_text_line(
     for char in sanitized:
         _draw_glyph(canvas, FONT_3X5.get(char, FONT_3X5["?"]), cursor, y, scale, color)
         cursor += glyph_width + spacing
+
+
+def _text_width(line: str, scale: int) -> int:
+    sanitized = _sanitize_text(line)
+    if not sanitized:
+        return 0
+    return len(sanitized) * (4 * scale) - scale
+
+
+def _fill_rect(
+    canvas: np.ndarray,
+    x0: int,
+    y0: int,
+    x1: int,
+    y1: int,
+    color: Sequence[int],
+) -> None:
+    height, width, _ = canvas.shape
+    left = max(0, min(width, int(x0)))
+    right = max(0, min(width, int(x1)))
+    top = max(0, min(height, int(y0)))
+    bottom = max(0, min(height, int(y1)))
+    if right > left and bottom > top:
+        canvas[top:bottom, left:right] = color
 
 
 def build_hold_frame(lines: Sequence[str], size: Sequence[int]) -> np.ndarray:
@@ -191,6 +228,103 @@ def build_hold_frame(lines: Sequence[str], size: Sequence[int]) -> np.ndarray:
     return frame
 
 
+def build_hud_frame(
+    left_lines: Sequence[str],
+    right_lines: Sequence[str],
+    size: Sequence[int],
+    hud_scale: float,
+) -> np.ndarray:
+    width = max(int(size[0]), 320)
+    height = max(int(size[1]), 180)
+    frame = np.zeros((height, width, 4), dtype=np.uint8)
+    margin = max(14, min(width, height) // 44)
+    gap = max(8, margin // 2)
+    base_scale = int(round((min(width, height) / 360.0) * max(0.5, hud_scale)))
+    scale = max(2, min(base_scale, 6))
+    title_scale = max(scale + 1, 3)
+    line_gap = max(3, scale)
+    pad_x = scale * 4
+    pad_y = scale * 3
+
+    left_title = left_lines[:1]
+    left_body = left_lines[1:]
+    left_width = max(
+        [_text_width(line, title_scale) for line in left_title]
+        + [_text_width(line, scale) for line in left_body]
+        + [scale * 32]
+    )
+    right_width = max([_text_width(line, scale) for line in right_lines] + [scale * 34])
+    left_panel_width = min(width - margin * 2, left_width + pad_x * 2)
+    right_panel_width = min(width - margin * 2, right_width + pad_x * 2)
+    left_panel_height = (
+        pad_y * 2
+        + (5 * title_scale if left_title else 0)
+        + (line_gap * 2 if left_title and left_body else 0)
+        + len(left_body) * (5 * scale + line_gap)
+    )
+    left_panel_height = max(left_panel_height, scale * 20)
+    right_panel_height = pad_y * 2 + len(right_lines) * (5 * scale + line_gap)
+    right_panel_height = max(right_panel_height, scale * 20)
+
+    left_x = margin
+    left_y = margin
+    right_x = width - margin - right_panel_width
+    right_y = margin
+    if right_x < left_x + left_panel_width + gap:
+        right_x = margin
+        right_y = margin + left_panel_height + gap
+
+    panel_color = (6, 10, 14, 172)
+    line_color = (36, 214, 192, 210)
+    title_color = (238, 252, 247, 245)
+    body_color = (190, 222, 224, 230)
+    warn_color = (255, 186, 87, 238)
+
+    _fill_rect(frame, left_x, left_y, left_x + left_panel_width, left_y + left_panel_height, panel_color)
+    _fill_rect(frame, left_x, left_y, left_x + scale, left_y + left_panel_height, line_color)
+    cursor_y = left_y + pad_y
+    if left_title:
+        _draw_text_line(
+            frame,
+            left_title[0],
+            cursor_y,
+            title_scale,
+            title_color,
+            x=left_x + pad_x,
+            align="left",
+        )
+        cursor_y += 5 * title_scale + line_gap * 2
+    for line in left_body:
+        _draw_text_line(
+            frame,
+            line,
+            cursor_y,
+            scale,
+            body_color,
+            x=left_x + pad_x,
+            align="left",
+        )
+        cursor_y += 5 * scale + line_gap
+
+    _fill_rect(frame, right_x, right_y, right_x + right_panel_width, right_y + right_panel_height, panel_color)
+    _fill_rect(frame, right_x, right_y, right_x + scale, right_y + right_panel_height, line_color)
+    cursor_y = right_y + pad_y
+    for line in right_lines:
+        color = warn_color if "OFFLINE" in line or "OFF" in line else body_color
+        _draw_text_line(
+            frame,
+            line,
+            cursor_y,
+            scale,
+            color,
+            x=right_x + pad_x,
+            align="left",
+        )
+        cursor_y += 5 * scale + line_gap
+
+    return frame
+
+
 class GarageHeatShow(mglw.WindowConfig):
     """GPU-heavy tile world simulation with CPU burners and thermal hold."""
 
@@ -220,6 +354,12 @@ class GarageHeatShow(mglw.WindowConfig):
         self.next_title_refresh_at = 0.0
         self.thermal_hold: Optional[ThermalHoldState] = None
         self.hold_texture = None
+        self.hud_texture = None
+        self.next_hud_refresh_at = 0.0
+        self.started_at = time.monotonic()
+        self.fps_estimate = 0.0
+        self.offscreen_texture = None
+        self.offscreen_framebuffer = None
         self.cpu_threads: List[threading.Thread] = []
 
         self.ctx.disable(moderngl.DEPTH_TEST)
@@ -394,10 +534,28 @@ class GarageHeatShow(mglw.WindowConfig):
         self.hold_texture = self.ctx.texture(
             self.wnd.buffer_size,
             3,
-            data=frame.tobytes(),
+            data=np.flipud(frame).tobytes(),
             alignment=1,
         )
         self.hold_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
+
+    def _display_target(self):
+        if self.ctx.screen is not None:
+            return self.ctx.screen
+        if (
+            self.offscreen_texture is None
+            or self.offscreen_framebuffer is None
+            or self.offscreen_texture.size != self.wnd.buffer_size
+        ):
+            if self.offscreen_framebuffer is not None:
+                self.offscreen_framebuffer.release()
+            if self.offscreen_texture is not None:
+                self.offscreen_texture.release()
+            self.offscreen_texture = self.ctx.texture(self.wnd.buffer_size, 4)
+            self.offscreen_framebuffer = self.ctx.framebuffer(
+                color_attachments=[self.offscreen_texture]
+            )
+        return self.offscreen_framebuffer
 
     def _trigger_thermal_hold(self, reasons: Sequence[str], notes: Sequence[str]) -> None:
         if self.thermal_hold is not None:
@@ -438,6 +596,71 @@ class GarageHeatShow(mglw.WindowConfig):
             self.wnd.title = f"{self.base_title} | " + " | ".join(parts)
         else:
             self.wnd.title = self.base_title
+
+    def _format_uptime(self) -> str:
+        total_seconds = max(0, int(time.monotonic() - self.started_at))
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        return f"UP {hours:02d}:{minutes:02d}:{seconds:02d}"
+
+    def _temperature_line(self, label: str, value: Optional[float], limit: float) -> str:
+        if limit <= 0:
+            return f"{label} HOLD OFF"
+        if value is None:
+            return f"{label} SENSOR OFFLINE"
+        return f"{label} {value:.0f}C LIMIT {limit:.0f}C"
+
+    def _hud_lines(self) -> Sequence[Sequence[str]]:
+        width, height = self.wnd.buffer_size
+        tile_size = max(2, int(self.args.tile_size))
+        tiles_x = max(1, int(np.ceil(width / tile_size)))
+        tiles_y = max(1, int(np.ceil(height / tile_size)))
+        with self.telemetry_lock:
+            gpu_temp = self.latest_temperatures.get("GPU")
+            cpu_temp = self.latest_temperatures.get("CPU")
+        left_lines = [
+            "GARAGE LIFE LAB",
+            "TILE WORLD STRESS",
+            f"{width}X{height} TILE {tile_size}",
+            f"GRID {tiles_x}X{tiles_y} STEP {self.args.substeps}",
+            f"CPU WORKERS {self.args.cpu_workers}",
+        ]
+        right_lines = [
+            self._temperature_line("GPU", gpu_temp, self.args.max_gpu_temp),
+            self._temperature_line("CPU", cpu_temp, self.args.max_cpu_temp),
+            f"FPS {self.fps_estimate:.0f}" if self.fps_estimate > 0 else "FPS --",
+            self._format_uptime(),
+            "THERMAL HOLD OFF" if self.args.no_thermal_hold else "THERMAL HOLD ARMED",
+        ]
+        return left_lines, right_lines
+
+    def _build_hud_texture(self) -> None:
+        if self.args.no_hud:
+            return
+        now = time.monotonic()
+        if (
+            self.hud_texture is not None
+            and self.hud_texture.size == self.wnd.buffer_size
+            and now < self.next_hud_refresh_at
+        ):
+            return
+        left_lines, right_lines = self._hud_lines()
+        frame = build_hud_frame(left_lines, right_lines, self.wnd.buffer_size, self.args.hud_scale)
+        data = np.flipud(frame).tobytes()
+        if self.hud_texture is None or self.hud_texture.size != self.wnd.buffer_size:
+            if self.hud_texture is not None:
+                self.hud_texture.release()
+            self.hud_texture = self.ctx.texture(
+                self.wnd.buffer_size,
+                4,
+                data=data,
+                alignment=1,
+            )
+            self.hud_texture.filter = (moderngl.NEAREST, moderngl.NEAREST)
+        else:
+            self.hud_texture.write(data)
+        self.next_hud_refresh_at = now + 0.5
 
     def _init_simulation_resources(self) -> None:
         if hasattr(self, "state_textures"):
@@ -632,10 +855,17 @@ class GarageHeatShow(mglw.WindowConfig):
             a, b = b, a
 
     def render(self, time_value: float, frame_time: float) -> None:
+        if frame_time > 0:
+            current_fps = 1.0 / frame_time
+            if self.fps_estimate <= 0:
+                self.fps_estimate = current_fps
+            else:
+                self.fps_estimate = self.fps_estimate * 0.92 + current_fps * 0.08
+
         if self.thermal_hold is not None:
             if self.hold_texture is None or self.hold_texture.size != self.wnd.buffer_size:
                 self._build_hold_texture(self.thermal_hold.lines)
-            self.ctx.screen.use()
+            self._display_target().use()
             self.ctx.viewport = (0, 0, *self.wnd.buffer_size)
             self.hold_texture.use(location=0)
             self.quad.render(self.message_program)
@@ -667,7 +897,7 @@ class GarageHeatShow(mglw.WindowConfig):
         self.active_state = next_index
 
     def _render_display(self, animated_time: float) -> None:
-        self.ctx.screen.use()
+        self._display_target().use()
         self.ctx.viewport = (0, 0, *self.wnd.buffer_size)
         self.state_textures[self.active_state].use(location=0)
         self.display_program["time"].value = animated_time
@@ -675,6 +905,21 @@ class GarageHeatShow(mglw.WindowConfig):
             animated_time * self.args.color_shift_speed
         ) % 10.0
         self.quad.render(self.display_program)
+        self._render_hud()
+
+    def _render_hud(self) -> None:
+        if self.args.no_hud:
+            return
+        self._build_hud_texture()
+        if self.hud_texture is None:
+            return
+        self._display_target().use()
+        self.ctx.viewport = (0, 0, *self.wnd.buffer_size)
+        self.hud_texture.use(location=0)
+        self.ctx.enable(moderngl.BLEND)
+        self.ctx.blend_func = (moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA)
+        self.quad.render(self.message_program)
+        self.ctx.disable(moderngl.BLEND)
 
     def resize(self, width: int, height: int):  # type: ignore[override]
         if self.thermal_hold is not None:
@@ -692,6 +937,15 @@ class GarageHeatShow(mglw.WindowConfig):
         if self.hold_texture is not None:
             self.hold_texture.release()
             self.hold_texture = None
+        if self.hud_texture is not None:
+            self.hud_texture.release()
+            self.hud_texture = None
+        if self.offscreen_framebuffer is not None:
+            self.offscreen_framebuffer.release()
+            self.offscreen_framebuffer = None
+        if self.offscreen_texture is not None:
+            self.offscreen_texture.release()
+            self.offscreen_texture = None
         super().destroy()
 
     @classmethod
@@ -720,6 +974,8 @@ class GarageHeatShow(mglw.WindowConfig):
         parser.add_argument("--max-gpu-temp", type=float, default=70.0, help="Hold the show if the GPU exceeds this temperature in Celsius")
         parser.add_argument("--thermal-poll-seconds", type=float, default=5.0, help="Sensor poll interval in seconds")
         parser.add_argument("--no-thermal-hold", action="store_true", help="Disable the thermal watchdog and hold screen")
+        parser.add_argument("--no-hud", action="store_true", help="Hide the in-frame show status overlay")
+        parser.add_argument("--hud-scale", type=float, default=1.0, help="Scale the in-frame show status overlay")
 
 
 def main() -> None:
