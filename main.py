@@ -277,6 +277,28 @@ float fbm(vec2 p) {
     return v;
 }
 
+float tsunamiWave(vec2 xz, float hTerrain, float safeFx, out float crest, out float trough) {
+    vec2 waveDir = normalize(vec2(0.78, 0.42));
+    vec2 crossDir = vec2(-waveDir.y, waveDir.x);
+    float along = dot(xz, waveDir);
+    float cross = dot(xz, crossDir);
+    float travel = along * 0.28 - time * (0.92 + safeFx * 0.18);
+    travel += fbm(vec2(cross * 0.035, along * 0.018) + time * 0.035) * 2.6;
+
+    float cycle = sin(travel);
+    crest = pow(max(cycle, 0.0), 5.0);
+    trough = pow(max(-sin(travel - 0.55), 0.0), 2.2);
+
+    float shoreAmplify = smoothstep(0.22, 1.75, hTerrain);
+    float shelfDrawdown = smoothstep(0.05, 1.05, hTerrain);
+    float longSwell = sin(along * 0.075 - time * 0.38 + fbm(xz * 0.025) * 4.0) * 0.075;
+    float chop = (fbm(xz * 0.75 + vec2(time * 0.24, -time * 0.18)) - 0.5) * 0.055;
+
+    float runup = crest * mix(0.55, 2.25, shoreAmplify) * safeFx;
+    float drawdown = trough * mix(0.34, 0.76, shelfDrawdown) * safeFx;
+    return longSwell + chop + runup - drawdown;
+}
+
 float map(in vec3 p, out int matID, out vec4 stateOut) {
     vec2 mapUV = p.xz * 0.03;
     vec4 state = textureLod(stateTex, mapUV, 0.0);
@@ -301,11 +323,9 @@ float map(in vec3 p, out int matID, out vec4 stateOut) {
     float hTerrain = baseH + canopyDetail + rockyDetail + ridgeRelief + microRelief + continentLift * mix(0.45, 1.35, detailFx);
     float dTerrain = p.y - hTerrain;
 
-    // Dynamic Ocean Waves
-    float waveTime = time * 1.5;
-    float wave1 = sin(p.x * 1.7 + waveTime) * cos(p.z * 1.4 + waveTime * 0.8);
-    float wave2 = sin(p.x * 3.8 - waveTime * 1.2) * cos(p.z * 3.2 + waveTime);
-    float hWater = 0.42 + (wave1 * 0.025 + wave2 * 0.012) * safeFx;
+    // Dynamic tsunami water: deep drawdown reveals land, crest runup climbs coastlines.
+    float crest; float trough;
+    float hWater = 0.26 + tsunamiWave(p.xz, hTerrain, safeFx, crest, trough);
     float dWater = p.y - hWater;
 
     if (dTerrain < dWater) {
@@ -463,15 +483,23 @@ void main() {
 
         } else {
             // Alien Ocean
-            float depth = clamp((0.42 - state.z * 3.5) * 0.7, 0.0, 1.0);
-            vec3 shallow = vec3(0.0, 0.6, 0.5);
-            vec3 deep = vec3(0.05, 0.1, 0.25);
+            float waveCrest; float waveTrough;
+            float waterLift = tsunamiWave(pos.xz, state.z * 3.2, safeFx, waveCrest, waveTrough);
+            float depth = clamp((pos.y - state.z * 3.5) * 0.22 + waveTrough * 0.35 + max(waterLift, 0.0) * 0.04, 0.0, 1.0);
+            vec3 shallow = vec3(0.0, 0.72, 0.62);
+            vec3 deep = vec3(0.035, 0.075, 0.22);
             matColor = mix(shallow, deep, depth);
+            float shoreFoam = smoothstep(0.22, 0.88, state.z) * smoothstep(0.08, 0.95, waveCrest);
+            float ripFoam = smoothstep(0.54, 0.84, fbm(pos.xz * 2.1 + vec2(time * 0.35)));
+            float drawdownShine = smoothstep(0.28, 0.85, waveTrough) * smoothstep(0.25, 0.75, state.z);
+            matColor = mix(matColor, vec3(0.72, 0.96, 0.88), clamp(shoreFoam * (0.35 + ripFoam * 0.35), 0.0, 0.7));
+            matColor += vec3(0.11, 0.22, 0.18) * drawdownShine;
             matColor += vec3(0.05, 0.16, 0.14) * contourPower * (1.0 - smoothstep(0.0, 0.08, abs(state.z - 0.46)));
 
             vec3 ref = reflect(rd, nor);
             float spe = pow(clamp(dot(ref, lightDir), 0.0, 1.0), 64.0) * sha;
-            emission += vec3(1.0) * spe * 0.8;
+            emission += vec3(1.0) * spe * (0.8 + waveCrest * 0.8);
+            emission += vec3(0.18, 0.55, 0.42) * waveCrest * safeFx * 0.55;
 
             // Reflected glow
             emission += volumeGlow * 0.2;
