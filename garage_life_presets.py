@@ -49,6 +49,9 @@ class LaunchPreset:
     exposure: float
     gamma: float
     contour_contrast: float
+    ray_steps: int
+    fx_intensity: float
+    camera_speed: float
     max_gpu_temp: float
     max_cpu_temp: float
     hud_scale: float = 1.0
@@ -79,6 +82,12 @@ class LaunchPreset:
             f"{self.gamma:.2f}",
             "--contour-contrast",
             f"{self.contour_contrast:.2f}",
+            "--ray-steps",
+            str(self.ray_steps),
+            "--fx-intensity",
+            f"{self.fx_intensity:.2f}",
+            "--camera-speed",
+            f"{self.camera_speed:.2f}",
             "--max-gpu-temp",
             f"{self.max_gpu_temp:.0f}",
             "--max-cpu-temp",
@@ -270,7 +279,7 @@ def build_presets(hw: HardwareInfo) -> list[LaunchPreset]:
             name="Safe Start",
             short_name="Low",
             audience="Older laptops, small GPUs, first launch",
-            description="Starts gently, proves the app works, and keeps the machine responsive.",
+            description="Starts gently with the 3D bio-world intact, proves the app works, and keeps the machine responsive.",
             width=safe_w,
             height=safe_h,
             tile_size=18,
@@ -281,6 +290,9 @@ def build_presets(hw: HardwareInfo) -> list[LaunchPreset]:
             exposure=1.25,
             gamma=1.20,
             contour_contrast=0.60,
+            ray_steps=48,
+            fx_intensity=0.65,
+            camera_speed=0.75,
             max_gpu_temp=72,
             max_cpu_temp=78,
             hud_scale=0.95,
@@ -290,7 +302,7 @@ def build_presets(hw: HardwareInfo) -> list[LaunchPreset]:
             name="Balanced Show",
             short_name="Medium",
             audience="Mainstream 1080p gaming PCs",
-            description="The default for a broad public release: readable, warm, and hard to misconfigure.",
+            description="The public-release default: cinematic 3D, readable motion, warm load, and hard to misconfigure.",
             width=full_w,
             height=full_h,
             tile_size=14,
@@ -301,6 +313,9 @@ def build_presets(hw: HardwareInfo) -> list[LaunchPreset]:
             exposure=1.35,
             gamma=1.18,
             contour_contrast=0.72,
+            ray_steps=72,
+            fx_intensity=0.85,
+            camera_speed=0.90,
             max_gpu_temp=75,
             max_cpu_temp=82,
             hud_scale=1.0,
@@ -310,7 +325,7 @@ def build_presets(hw: HardwareInfo) -> list[LaunchPreset]:
             name="Performance Show",
             short_name="High",
             audience="RTX 3070/4070 class, RX 6800 class, strong desktops",
-            description="More detail and heat for machines with strong cooling and a real discrete GPU.",
+            description="Sharper raymarched terrain, stronger glow, and more heat for cooled discrete-GPU desktops.",
             width=full_w,
             height=full_h,
             tile_size=10,
@@ -321,6 +336,9 @@ def build_presets(hw: HardwareInfo) -> list[LaunchPreset]:
             exposure=1.45,
             gamma=1.15,
             contour_contrast=0.82,
+            ray_steps=104,
+            fx_intensity=1.10,
+            camera_speed=1.00,
             max_gpu_temp=78,
             max_cpu_temp=86,
             hud_scale=1.0,
@@ -330,7 +348,7 @@ def build_presets(hw: HardwareInfo) -> list[LaunchPreset]:
             name="Max Heat Lab",
             short_name="Ultra",
             audience="RTX 5070/4080/4090 class and high-core CPUs",
-            description="Aggressive stress and display mode. Use when cooling, noise, and power are intentional.",
+            description="Full cinematic stress mode. Use when cooling, noise, and power draw are intentional.",
             width=full_w,
             height=full_h,
             tile_size=8,
@@ -341,6 +359,9 @@ def build_presets(hw: HardwareInfo) -> list[LaunchPreset]:
             exposure=1.55,
             gamma=1.12,
             contour_contrast=0.90,
+            ray_steps=140,
+            fx_intensity=1.30,
+            camera_speed=1.05,
             max_gpu_temp=80,
             max_cpu_temp=88,
             hud_scale=1.0,
