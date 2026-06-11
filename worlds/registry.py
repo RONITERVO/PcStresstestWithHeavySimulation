@@ -6,6 +6,7 @@ from typing import Iterable, Optional
 from . import (
     audio_reactive_3d,
     living_sketchbook_3d,
+    minecraft_3d,
     muddy_asteroid_planet_3d,
     neural_plane_3d,
     original_2d,
@@ -18,9 +19,10 @@ from . import (
 )
 from .spec import WorldSpec
 
-DEFAULT_WORLD_ID = "original-tuned-3d"
+DEFAULT_WORLD_ID = "minecraft-3d"
 
 _WORLD_ORDER: tuple[WorldSpec, ...] = (
+    minecraft_3d.SPEC,
     living_sketchbook_3d.SPEC,
     sketchbook_visualizer_3d.SPEC,
     sketchbook_ink_islands_3d.SPEC,
