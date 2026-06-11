@@ -5,7 +5,16 @@ from typing import Iterable, Optional
 
 from . import (
     audio_reactive_3d,
+    Final_minecraft_3D,
+    future_future_minecraft,
+    future_minecraft,
     living_sketchbook_3d,
+    minecraft_3d,
+    minecraft_first_future,
+    minecraft_fluid,
+    minecraft_long_term_3d,
+    minecraft_voxels_3d,
+    minecraft_voxelv2_3d,
     muddy_asteroid_planet_3d,
     neural_plane_3d,
     original_2d,
@@ -14,13 +23,24 @@ from . import (
     sketchbook_ink_islands_3d,
     sketchbook_visualizer_3d,
     static_sandstorm_3d,
+    true_minecraft,
     tsunami_land_3d,
 )
 from .spec import WorldSpec
 
-DEFAULT_WORLD_ID = "original-tuned-3d"
+DEFAULT_WORLD_ID = "minecraft-long-term-3d"
 
 _WORLD_ORDER: tuple[WorldSpec, ...] = (
+    minecraft_first_future.SPEC,
+    future_future_minecraft.SPEC,
+    future_minecraft.SPEC,
+    true_minecraft.SPEC,
+    minecraft_voxelv2_3d.SPEC,
+    minecraft_fluid.SPEC,
+    minecraft_voxels_3d.SPEC,
+    Final_minecraft_3D.SPEC,
+    minecraft_long_term_3d.SPEC,
+    minecraft_3d.SPEC,
     living_sketchbook_3d.SPEC,
     sketchbook_visualizer_3d.SPEC,
     sketchbook_ink_islands_3d.SPEC,

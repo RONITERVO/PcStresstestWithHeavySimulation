@@ -453,7 +453,7 @@ SPEC = WorldSpec(
     seed_field=seed_field,
     default_overrides={},
     preview_image='assets/world_previews/original-tuned-3d.png',
-    stability_notes=('safe', 'current tuned default'),
+    stability_notes=('safe', 'legacy tuned'),
     hud_subtitle='3D VOLUMETRIC STRESS',
     preview_palette=('#020a0d', '#092022', '#184b3d', '#3fa35f', '#a8d56b', '#77d8ff', '#ff78a8'),
 )

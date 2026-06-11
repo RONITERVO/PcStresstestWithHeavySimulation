@@ -3,7 +3,7 @@
 Garage Life Lab is a long-run selectable-world show for a large garage display. It keeps the machine hot with a full-screen GPU simulation plus optional CPU burners, while the launcher separates the world you want to see from how hard the PC should work.
 
 ## Highlights
-- Selectable worlds: Living Sketchbook, Sketchbook Visualizer, Sketchbook Ink Islands, Audio Reactive 3D, Sahara Sandstorm, Tsunami Land, Muddy Asteroid Planet, Neural Plane, Original 3D, Original Tuned 3D, and Original 2D.
+- Selectable worlds: Minecraft Long Term, Minecraft, Living Sketchbook, Sketchbook Visualizer, Sketchbook Ink Islands, Audio Reactive 3D, Sahara Sandstorm, Tsunami Land, Muddy Asteroid Planet, Neural Plane, Original 3D, Original Tuned 3D, and Original 2D.
 - 3D raymarched worlds and a legacy 2D tile world designed to stay readable from across a garage.
 - In-frame show HUD with resolution, tile grid, worker load, FPS, uptime, temperature limits, and thermal hold state.
 - Full-screen GPU workload retained for sustained heat.
@@ -32,6 +32,8 @@ The first screen detects the PC, lets you choose a world, recommends a PC load p
 
 World selection is separate from PC load:
 
+- **Minecraft Long Term**: the default flagship Minecraft collaboration world with block-quantized terrain, bounded rivers/oceans, villages, caves, ores, torches, weather, reflective water, soft shadows, and live camera controls.
+- **Minecraft**: the original blocky 3D Overworld-style scene with stepped terrain, water, trees, small huts, glowing ores, square clouds, and live camera controls.
 - **Living Sketchbook**: hand-drawn volumetric ink world with paper grain, sun-horizon washes, and generated audio FFT/wave input.
 - **Sketchbook Visualizer**: sparse island sketchbook scene with graphite hatching, watercolor ocean washes, and audio-reactive sun strokes.
 - **Sketchbook Ink Islands**: refined sketchbook island world with curl-noise ink flow, soft shadows, color-burn sun strokes, and audio-reactive washes.
@@ -41,7 +43,7 @@ World selection is separate from PC load:
 - **Muddy Asteroid Planet**: muddy planetary surface experiment.
 - **Neural Plane**: neural/matrix containment experiment.
 - **Original 3D**: legacy 3D raymarched bio-world.
-- **Original Tuned 3D**: current tuned default.
+- **Original Tuned 3D**: tuned legacy bio-world.
 - **Original 2D**: legacy tile-world shader.
 
 List world IDs from the command line:
