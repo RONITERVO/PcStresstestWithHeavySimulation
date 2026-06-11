@@ -167,13 +167,19 @@ float terrainHeight(vec4 state, vec2 cell) {
     return floor(raw) * (BLOCK_SIZE * 0.52) + 0.55;
 }
 
+float waterPresence(vec4 state, float h, float sea) {
+    float lowTerrain = 1.0 - smoothstep(sea - 0.04, sea + 0.16, h);
+    float riverOrOcean = smoothstep(0.46, 0.80, state.r);
+    return lowTerrain * riverOrOcean;
+}
+
 float map(in vec3 p, out int matID, out vec4 stateOut) {
     vec2 cell = floor(p.xz / BLOCK_SIZE);
     vec2 mapUV = (cell + 0.5) * BLOCK_SIZE * MAP_SCALE;
     vec4 state = textureLod(stateTex, mapUV, 0.0);
     float safeFx = clamp(fxIntensity, 0.2, 1.6);
     float h = terrainHeight(state, cell);
-    float sea = 1.70;
+    float sea = 1.18;
 
     float d = p.y - h;
     matID = 1;
@@ -241,10 +247,13 @@ float map(in vec3 p, out int matID, out vec4 stateOut) {
     }
 
     float waterWave = (floor(noise(cell * 0.16 + vec2(time * 0.07, -time * 0.04)) * 3.0) - 1.0) * 0.012 * safeFx;
-    float dWater = p.y - (sea + waterWave);
-    if (h < sea + 0.05 && dWater < d) {
-        d = dWater * 0.85;
-        matID = 0;
+    float waterMask = waterPresence(state, h, sea);
+    if (waterMask > 0.04) {
+        float dWater = p.y - (sea + waterWave);
+        if (dWater < d) {
+            d = dWater * 0.85;
+            matID = 0;
+        }
     }
 
     return d;
@@ -363,7 +372,7 @@ void main() {
 
         vec3 matColor = vec3(0.0);
         vec3 emission = vec3(0.0);
-        float sea = 1.70;
+        float sea = 1.18;
 
         if (matID == 0) {
             vec3 shallow = vec3(0.12, 0.52, 0.82);
