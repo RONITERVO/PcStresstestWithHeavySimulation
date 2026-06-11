@@ -87,6 +87,9 @@ uniform float contourContrast;
 uniform float colorShift;
 uniform float cameraSpeed;
 uniform float fxIntensity;
+uniform vec3 cameraOffset;
+uniform vec2 cameraYawPitch;
+uniform float cameraZoom;
 uniform int raySteps;
 uniform float audioEnergy;
 uniform float audioBass;
@@ -106,6 +109,20 @@ mat3 setCamera(in vec3 ro, in vec3 ta, float cr) {
     vec3 cu = normalize(cross(cw, cp));
     vec3 cv = normalize(cross(cu, cw));
     return mat3(cu, cv, cw);
+}
+
+mat2 cameraRotate2(float angle) {
+    float s = sin(angle);
+    float c = cos(angle);
+    return mat2(c, -s, s, c);
+}
+
+vec3 cameraInputRay(vec2 p, float lens) {
+    float zoomedLens = lens * clamp(exp(cameraZoom), 0.35, 3.0);
+    vec3 ray = normalize(vec3(p.xy, zoomedLens));
+    ray.yz = cameraRotate2(cameraYawPitch.y) * ray.yz;
+    ray.xz = cameraRotate2(cameraYawPitch.x) * ray.xz;
+    return normalize(ray);
 }
 
 float map(in vec3 p, out float matID, out vec4 stateOut) {
@@ -160,9 +177,11 @@ void main() {
     float camTime = time * 0.15 * max(cameraSpeed, 0.05);
     vec3 ro = vec3(camTime * 5.0, 7.0 + sin(camTime * 0.5) * 1.2 + camShake, camTime * 4.0);
     vec3 ta = vec3(ro.x + 4.8, 2.1, ro.z + 4.8 + sin(camTime));
+    ro += cameraOffset;
+    ta += cameraOffset;
 
     mat3 ca = setCamera(ro, ta, sin(camTime * 0.3) * 0.1 + camShake);
-    vec3 rd = ca * normalize(vec3(p.xy, 2.0 - audioBass * 0.2));
+    vec3 rd = ca * cameraInputRay(p, 2.0 - audioBass * 0.2);
 
     vec3 lightDir = normalize(vec3(0.8, 0.62, -0.4));
     float sun = pow(max(0.0, dot(rd, lightDir)), 220.0);

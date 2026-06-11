@@ -7,6 +7,7 @@ Garage Life Lab is a long-run selectable-world show for a large garage display. 
 - 3D raymarched worlds and a legacy 2D tile world designed to stay readable from across a garage.
 - In-frame show HUD with resolution, tile grid, worker load, FPS, uptime, temperature limits, and thermal hold state.
 - Full-screen GPU workload retained for sustained heat.
+- Live camera steering in 3D worlds with WASD, arrow keys, mouse drag, and wheel zoom.
 - Optional NumPy CPU burners for extra room heat.
 - Thermal watchdog with on-screen hold state and persistent logs.
 
@@ -57,6 +58,19 @@ List world IDs from the command line:
 The app keeps developer-level control under **Advanced controls**, where every generated parameter can still be edited before launch.
 
 Preset design targets the broad Windows gaming-PC middle first: 1080p screens, 16-32 GB RAM, 6-8 CPU cores, and DirectX 12-class GPUs. The launcher auto-selects a tier from GPU class, CPU thread count, RAM, and screen size, then shows the exact generated launch before starting. Higher tiers raise simulation steps, raymarch steps, cinematic FX intensity, and CPU burner load.
+
+## Live Camera Controls
+
+3D worlds keep their cinematic path, but you can steer on top of it while the simulation runs:
+
+- `W` / `S`: move forward and backward.
+- `A` / `D`: strafe left and right.
+- `Q` / `E` or `Page Down` / `Page Up`: move down and up.
+- Arrow keys: look left, right, up, and down.
+- Mouse drag: steer the camera.
+- Mouse wheel or `+` / `-`: zoom in and out.
+- `Shift`: faster movement; `Ctrl`: slower movement.
+- `M`: toggle captured mouse-look mode; `R`: reset camera offset, look, and zoom.
 
 | Tier | Typical PC | What changes |
 | --- | --- | --- |
@@ -121,6 +135,10 @@ Run every registered world at low settings and fail on startup, shader, or compi
 - `--ray-steps 104`
 - `--fx-intensity 1.0`
 - `--camera-speed 1.0`
+- `--camera-move-speed 8.0`
+- `--camera-look-speed 1.0`
+- `--camera-zoom-speed 0.12`
+- `--no-camera-controls`
 - `--cpu-workers 16`
 - `--cpu-matrix 1024`
 - `--max-cpu-temp 75`

@@ -1,6 +1,7 @@
 """Garage Life Lab: 1080p bio-simulation space heater (3D Raymarched Volumetric Edition)."""
 from __future__ import annotations
 
+import math
 import subprocess
 import threading
 import time
@@ -155,6 +156,9 @@ DEFAULT_ARGUMENTS = {
     "ray_steps": 96,
     "fx_intensity": 1.0,
     "camera_speed": 1.0,
+    "camera_move_speed": 8.0,
+    "camera_look_speed": 1.0,
+    "camera_zoom_speed": 0.12,
     "cpu_workers": 0,
     "cpu_matrix": 896,
     "tile_size": 12,
@@ -565,6 +569,11 @@ class GarageHeatShow(mglw.WindowConfig):
         self.audio: Optional[GenerativeAudioEngine] = None
         self.audio_fft_tex = None
         self.audio_wave_tex = None
+        self.pressed_keys = set()
+        self.mouse_look_enabled = False
+        self.camera_offset = np.zeros(3, dtype=np.float32)
+        self.camera_yaw_pitch = np.zeros(2, dtype=np.float32)
+        self.camera_zoom = 0.0
 
         self.ctx.disable(moderngl.DEPTH_TEST)
         self.quad = geometry.quad_fs()
@@ -990,6 +999,108 @@ class GarageHeatShow(mglw.WindowConfig):
             int(max(32, min(160, self.args.ray_steps))),
         )
 
+    def _camera_controls_enabled(self) -> bool:
+        return not getattr(self.args, "no_camera_controls", False)
+
+    def _reset_camera_controls(self) -> None:
+        self.camera_offset.fill(0.0)
+        self.camera_yaw_pitch.fill(0.0)
+        self.camera_zoom = 0.0
+
+    def _toggle_mouse_look(self) -> None:
+        self.mouse_look_enabled = not self.mouse_look_enabled
+        try:
+            self.wnd.mouse_exclusivity = self.mouse_look_enabled
+        except (AttributeError, NotImplementedError):
+            self.mouse_look_enabled = False
+
+    def _key_is_down(self, *names: str) -> bool:
+        keys = self.wnd.keys
+        return any(getattr(keys, name, None) in self.pressed_keys for name in names)
+
+    def _update_camera_controls(self, frame_time: float) -> None:
+        if not self._camera_controls_enabled() or frame_time <= 0:
+            return
+
+        move_x = float(self._key_is_down("D")) - float(self._key_is_down("A"))
+        move_y = float(self._key_is_down("E", "PAGE_UP")) - float(self._key_is_down("Q", "PAGE_DOWN"))
+        move_z = float(self._key_is_down("W")) - float(self._key_is_down("S"))
+        movement = np.array([move_x, move_y, move_z], dtype=np.float32)
+        length = float(np.linalg.norm(movement))
+        if length > 0.0:
+            movement /= length
+            yaw = float(self.camera_yaw_pitch[0])
+            forward = np.array([math.sin(yaw), 0.0, math.cos(yaw)], dtype=np.float32)
+            right = np.array([math.cos(yaw), 0.0, -math.sin(yaw)], dtype=np.float32)
+            up = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+            speed_scale = 1.0
+            modifiers = getattr(self.wnd, "modifiers", None)
+            if modifiers is not None:
+                if getattr(modifiers, "shift", False):
+                    speed_scale *= 2.5
+                if getattr(modifiers, "ctrl", False):
+                    speed_scale *= 0.35
+            speed = max(0.0, float(self.args.camera_move_speed)) * speed_scale
+            self.camera_offset += (right * movement[0] + up * movement[1] + forward * movement[2]) * speed * frame_time
+
+        look_step = max(0.0, float(self.args.camera_look_speed)) * frame_time
+        yaw_delta = float(self._key_is_down("RIGHT")) - float(self._key_is_down("LEFT"))
+        pitch_delta = float(self._key_is_down("UP")) - float(self._key_is_down("DOWN"))
+        if yaw_delta or pitch_delta:
+            self.camera_yaw_pitch[0] += yaw_delta * look_step
+            self.camera_yaw_pitch[1] = float(np.clip(
+                self.camera_yaw_pitch[1] + pitch_delta * look_step,
+                -1.2,
+                1.2,
+            ))
+
+        zoom_delta = float(self._key_is_down("EQUAL")) - float(self._key_is_down("MINUS"))
+        if zoom_delta:
+            self._apply_zoom_delta(zoom_delta * max(0.0, float(self.args.camera_zoom_speed)) * 60.0 * frame_time)
+
+    def _sync_camera_uniforms(self) -> None:
+        self._write_uniform(self.display_program, "cameraOffset", self.camera_offset)
+        self._write_uniform(self.display_program, "cameraYawPitch", self.camera_yaw_pitch)
+        self._set_uniform(self.display_program, "cameraZoom", float(self.camera_zoom))
+
+    def _apply_mouse_look_delta(self, dx: float, dy: float) -> None:
+        if not self._camera_controls_enabled():
+            return
+        scale = 0.0025 * max(0.0, float(self.args.camera_look_speed))
+        self.camera_yaw_pitch[0] += float(dx) * scale
+        self.camera_yaw_pitch[1] = float(np.clip(
+            self.camera_yaw_pitch[1] - float(dy) * scale,
+            -1.2,
+            1.2,
+        ))
+
+    def _apply_zoom_delta(self, delta: float) -> None:
+        if not self._camera_controls_enabled():
+            return
+        self.camera_zoom = float(np.clip(self.camera_zoom + float(delta), -1.4, 1.6))
+
+    def key_event(self, key, action, modifiers) -> None:  # type: ignore[override]
+        if not self._camera_controls_enabled():
+            return
+        if action == self.wnd.keys.ACTION_PRESS:
+            self.pressed_keys.add(key)
+            if key == self.wnd.keys.R:
+                self._reset_camera_controls()
+            elif key == self.wnd.keys.M:
+                self._toggle_mouse_look()
+        elif action == self.wnd.keys.ACTION_RELEASE:
+            self.pressed_keys.discard(key)
+
+    def mouse_position_event(self, x: int, y: int, dx: int, dy: int) -> None:  # type: ignore[override]
+        if self.mouse_look_enabled:
+            self._apply_mouse_look_delta(dx, dy)
+
+    def mouse_drag_event(self, x: int, y: int, dx: int, dy: int) -> None:  # type: ignore[override]
+        self._apply_mouse_look_delta(dx, dy)
+
+    def mouse_scroll_event(self, x_offset: float, y_offset: float) -> None:  # type: ignore[override]
+        self._apply_zoom_delta(float(y_offset) * max(0.0, float(self.args.camera_zoom_speed)))
+
     def _spin_cpu_workers(self) -> None:
         for worker_id in range(self.args.cpu_workers):
             thread = threading.Thread(
@@ -1042,6 +1153,7 @@ class GarageHeatShow(mglw.WindowConfig):
             self._init_simulation_resources()
             self._sync_static_uniforms()
 
+        self._update_camera_controls(frame_time)
         self._refresh_window_title()
         audio_values = self._refresh_audio_textures()
 
@@ -1085,6 +1197,7 @@ class GarageHeatShow(mglw.WindowConfig):
         self._set_uniform(self.display_program, "colorShift", (
             animated_time * self.args.color_shift_speed
         ) % 10.0)
+        self._sync_camera_uniforms()
         self.quad.render(self.display_program)
         self._render_hud()
 
@@ -1112,6 +1225,11 @@ class GarageHeatShow(mglw.WindowConfig):
     def destroy(self) -> None:
         self.stop_event.set()
         self.thermal_thread_stop.set()
+        if self.mouse_look_enabled:
+            try:
+                self.wnd.mouse_exclusivity = False
+            except (AttributeError, NotImplementedError):
+                pass
         for thread in self.cpu_threads:
             thread.join(timeout=1.0)
         self.cpu_threads.clear()
@@ -1161,6 +1279,10 @@ class GarageHeatShow(mglw.WindowConfig):
         parser.add_argument("--ray-steps", type=int, default=None, help="Maximum raymarch steps per pixel")
         parser.add_argument("--fx-intensity", type=float, default=None, help="Cinematic glow, aurora, terrain, and material intensity")
         parser.add_argument("--camera-speed", type=float, default=None, help="Cinematic camera speed multiplier")
+        parser.add_argument("--camera-move-speed", type=float, default=None, help="Live WASD/QE camera movement speed")
+        parser.add_argument("--camera-look-speed", type=float, default=None, help="Live mouse and arrow-key camera look speed")
+        parser.add_argument("--camera-zoom-speed", type=float, default=None, help="Live mouse-wheel and +/- camera zoom speed")
+        parser.add_argument("--no-camera-controls", action="store_true", help="Disable live WASD, arrow-key, mouse, and zoom controls")
         parser.add_argument("--cpu-workers", type=int, default=None, help="CPU burner thread count")
         parser.add_argument("--cpu-matrix", type=int, default=None, help="CPU burner matrix size")
         parser.add_argument("--tile-size", type=int, default=None, help="Base resolution downscale factor for fluid sim")

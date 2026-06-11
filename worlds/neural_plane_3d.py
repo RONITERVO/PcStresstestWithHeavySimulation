@@ -107,6 +107,9 @@ uniform float gamma;
 uniform float contourContrast;
 uniform float cameraSpeed;
 uniform float fxIntensity;
+uniform vec3 cameraOffset;
+uniform vec2 cameraYawPitch;
+uniform float cameraZoom;
 uniform int raySteps;
 
 #define MAX_STEPS 160
@@ -119,6 +122,20 @@ mat3 setCamera(in vec3 ro, in vec3 ta, float cr) {
     vec3 cu = normalize(cross(cw, cp));
     vec3 cv = normalize(cross(cu, cw));
     return mat3(cu, cv, cw);
+}
+
+mat2 cameraRotate2(float angle) {
+    float s = sin(angle);
+    float c = cos(angle);
+    return mat2(c, -s, s, c);
+}
+
+vec3 cameraInputRay(vec2 p, float lens) {
+    float zoomedLens = lens * clamp(exp(cameraZoom), 0.35, 3.0);
+    vec3 ray = normalize(vec3(p.xy, zoomedLens));
+    ray.yz = cameraRotate2(cameraYawPitch.y) * ray.yz;
+    ray.xz = cameraRotate2(cameraYawPitch.x) * ray.xz;
+    return normalize(ray);
 }
 
 float hash12(vec2 p) {
@@ -219,9 +236,11 @@ void main() {
     // Lift camera baseline and look slightly down so it never dips below max terrain bounds
     vec3 ro = vec3(camTime * 4.0, 5.5 + sin(camTime * 0.3) * 1.2, camTime * 3.0);
     vec3 ta = ro + vec3(cos(camTime * 0.25), -0.6, sin(camTime * 0.25));
+    ro += cameraOffset;
+    ta += cameraOffset;
 
     mat3 ca = setCamera(ro, ta, sin(camTime * 0.15) * 0.08);
-    vec3 rd = ca * normalize(vec3(p.xy, 2.0));
+    vec3 rd = ca * cameraInputRay(p, 2.0);
 
     vec3 lightDir = normalize(vec3(0.5, 0.8, -0.6));
 
