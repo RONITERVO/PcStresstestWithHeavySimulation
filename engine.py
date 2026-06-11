@@ -17,7 +17,19 @@ from moderngl_window import geometry
 from worlds.registry import DEFAULT_WORLD_ID, get_world, world_ids
 from worlds.spec import WorldSpec
 
+try:
+    import pyaudio
+
+    HAS_AUDIO = True
+except ImportError:
+    pyaudio = None
+    HAS_AUDIO = False
+
 CREATE_NO_WINDOW = 0x08000000
+CHUNKS_PER_SEC = 60
+SAMPLE_RATE = 44100
+CHUNK_SIZE = SAMPLE_RATE // CHUNKS_PER_SEC
+FFT_BINS = 128
 CPU_SENSOR_POWERSHELL = """
 $ErrorActionPreference = 'Stop'
 $namespaces = @('root\\LibreHardwareMonitor', 'root\\OpenHardwareMonitor')
@@ -152,6 +164,135 @@ DEFAULT_ARGUMENTS = {
     "hud_scale": 1.0,
     "quit_after": 0.0,
 }
+
+
+def _smoothstep(edge0: float, edge1: float, x: float) -> float:
+    t = np.clip((x - edge0) / (edge1 - edge0), 0.0, 1.0)
+    return float(t * t * (3.0 - 2.0 * t))
+
+
+class GenerativeAudioEngine:
+    """Small procedural audio source for worlds that expose audio uniforms."""
+
+    def __init__(self) -> None:
+        self.active = True
+        self.time_value = 0.0
+        self.fft_data = np.zeros(FFT_BINS, dtype=np.float32)
+        self.wave_data = np.zeros(FFT_BINS, dtype=np.float32)
+        self.energy = 0.0
+        self.bass = 0.0
+        self.treble = 0.0
+        self.chords = [
+            [32.70, 65.41, 98.00, 155.56, 196.00],
+            [27.50, 55.00, 82.41, 138.59, 164.81],
+            [21.83, 43.65, 65.41, 103.83, 130.81],
+            [36.71, 73.42, 110.00, 174.61, 220.00],
+        ]
+        self.current_chord_idx = 0
+        self.phase = np.zeros(5, dtype=np.float32)
+        self.lock = threading.Lock()
+        self._pa = None
+        self._stream = None
+        self.simulated = True
+        if HAS_AUDIO:
+            self._start_audio_stream()
+        else:
+            self._start_simulation_thread()
+
+    def _start_audio_stream(self) -> None:
+        try:
+            self._pa = pyaudio.PyAudio()
+            self._stream = self._pa.open(
+                format=pyaudio.paFloat32,
+                channels=1,
+                rate=SAMPLE_RATE,
+                output=True,
+                frames_per_buffer=CHUNK_SIZE,
+                stream_callback=self._audio_callback,
+            )
+            self._stream.start_stream()
+            self.simulated = False
+        except Exception:
+            self._pa = None
+            self._stream = None
+            self._start_simulation_thread()
+
+    def _start_simulation_thread(self) -> None:
+        self.simulated = True
+        thread = threading.Thread(target=self._simulate_audio, name="audio-simulator", daemon=True)
+        thread.start()
+
+    def _generate_chunk(self) -> np.ndarray:
+        dt = CHUNK_SIZE / SAMPLE_RATE
+        t_seq = np.linspace(self.time_value, self.time_value + dt, CHUNK_SIZE, endpoint=False)
+        self.time_value += dt
+
+        macro_time = self.time_value * 0.15
+        next_chord_idx = (self.current_chord_idx + 1) % len(self.chords)
+        blend = _smoothstep(0.8, 1.0, macro_time % 1.0)
+        if (macro_time % 1.0) < 0.05 and macro_time > self.current_chord_idx + 1:
+            self.current_chord_idx = next_chord_idx
+
+        chord_a = np.array(self.chords[self.current_chord_idx], dtype=np.float32)
+        chord_b = np.array(self.chords[next_chord_idx], dtype=np.float32)
+        freqs = chord_a * (1.0 - blend) + chord_b * blend
+
+        out = np.zeros(CHUNK_SIZE, dtype=np.float32)
+        for index, freq in enumerate(freqs):
+            fm = np.sin(2.0 * np.pi * (freq * 0.5) * t_seq) * (
+                1.2 + 0.8 * np.sin(self.time_value * 0.2 + index)
+            )
+            phase_inc = 2.0 * np.pi * freq * t_seq + fm
+            amp = 0.12 + 0.08 * np.sin(self.time_value * 0.4 + index * 1.6)
+            out += np.sin(phase_inc + self.phase[index]) * amp
+            self.phase[index] = (self.phase[index] + 2.0 * np.pi * freq * dt) % (2.0 * np.pi)
+
+        kick_env = max(0.0, np.sin(self.time_value * np.pi * 2.0 * 1.5)) ** 24.0
+        out += np.sin(2.0 * np.pi * 45.0 * t_seq - kick_env * 15.0) * kick_env * 0.6
+        noise_env = max(0.0, np.sin(self.time_value * np.pi * 0.25)) ** 4.0
+        out += np.random.normal(0.0, 0.01 + 0.03 * noise_env, CHUNK_SIZE)
+        out = np.clip(out, -1.0, 1.0).astype(np.float32)
+
+        with self.lock:
+            window = np.hanning(CHUNK_SIZE)
+            fft_complex = np.fft.rfft(out * window)
+            fft_mag = np.abs(fft_complex[:FFT_BINS]) / (CHUNK_SIZE / 2)
+            self.fft_data = self.fft_data * 0.6 + fft_mag.astype(np.float32) * 0.4
+            wave_downsampled = out[:: max(1, CHUNK_SIZE // FFT_BINS)][:FFT_BINS]
+            self.wave_data = self.wave_data * 0.5 + wave_downsampled * 0.5
+            self.energy = float(np.mean(self.fft_data))
+            self.bass = float(np.mean(self.fft_data[:8]))
+            self.treble = float(np.mean(self.fft_data[64:]))
+        return out
+
+    def _audio_callback(self, in_data, frame_count, time_info, status):
+        return self._generate_chunk().tobytes(), pyaudio.paContinue
+
+    def _simulate_audio(self) -> None:
+        while self.active:
+            self._generate_chunk()
+            time.sleep(1.0 / CHUNKS_PER_SEC)
+
+    def get_data(self) -> tuple[np.ndarray, np.ndarray, float, float, float]:
+        with self.lock:
+            return (
+                self.fft_data.copy(),
+                self.wave_data.copy(),
+                self.energy,
+                self.bass,
+                self.treble,
+            )
+
+    def destroy(self) -> None:
+        self.active = False
+        try:
+            if self._stream is not None:
+                self._stream.stop_stream()
+                self._stream.close()
+            if self._pa is not None:
+                self._pa.terminate()
+        except Exception:
+            pass
 
 
 @dataclass(frozen=True)
@@ -421,6 +562,9 @@ class GarageHeatShow(mglw.WindowConfig):
         self.offscreen_texture = None
         self.offscreen_framebuffer = None
         self.cpu_threads: List[threading.Thread] = []
+        self.audio: Optional[GenerativeAudioEngine] = None
+        self.audio_fft_tex = None
+        self.audio_wave_tex = None
 
         self.ctx.disable(moderngl.DEPTH_TEST)
         self.quad = geometry.quad_fs()
@@ -441,6 +585,8 @@ class GarageHeatShow(mglw.WindowConfig):
         self.update_program["stateTex"].value = 0
         self.display_program["stateTex"].value = 0
         self.message_program["displayTex"].value = 0
+        if self.world.uses_audio:
+            self._init_audio_resources()
 
         if (self.args.width, self.args.height) != self.window_size:
             self.wnd.resize(self.args.width, self.args.height)
@@ -452,6 +598,24 @@ class GarageHeatShow(mglw.WindowConfig):
             self._spin_cpu_workers()
         if not self.args.no_thermal_hold:
             self._spin_thermal_watchdog()
+
+    def _init_audio_resources(self) -> None:
+        self.audio = GenerativeAudioEngine()
+        self.audio_fft_tex = self.ctx.texture((FFT_BINS, 1), 1, dtype="f4")
+        self.audio_fft_tex.filter = (moderngl.LINEAR, moderngl.NEAREST)
+        self.audio_wave_tex = self.ctx.texture((FFT_BINS, 1), 1, dtype="f4")
+        self.audio_wave_tex.filter = (moderngl.LINEAR, moderngl.NEAREST)
+        self._set_uniform(self.update_program, "audioFft", 1)
+        self._set_uniform(self.display_program, "audioFft", 1)
+        self._set_uniform(self.display_program, "audioWave", 2)
+
+    def _refresh_audio_textures(self):
+        if self.audio is None or self.audio_fft_tex is None or self.audio_wave_tex is None:
+            return None
+        fft_data, wave_data, energy, bass, treble = self.audio.get_data()
+        self.audio_fft_tex.write(fft_data.tobytes())
+        self.audio_wave_tex.write(wave_data.tobytes())
+        return energy, bass, treble
 
     def _apply_world_defaults(self, world: WorldSpec) -> None:
         defaults = dict(DEFAULT_ARGUMENTS)
@@ -681,6 +845,11 @@ class GarageHeatShow(mglw.WindowConfig):
         else:
             self.wnd.title = self.base_title
 
+    def _audio_status_line(self) -> Optional[str]:
+        if not self.world.uses_audio or self.audio is None:
+            return None
+        return "AUDIO SIMULATED" if self.audio.simulated else "AUDIO ONLINE"
+
     def _format_uptime(self) -> str:
         total_seconds = max(0, int(time.monotonic() - self.started_at))
         hours = total_seconds // 3600
@@ -719,9 +888,14 @@ class GarageHeatShow(mglw.WindowConfig):
             self._temperature_line("GPU", gpu_temp, self.args.max_gpu_temp),
             self._temperature_line("CPU", cpu_temp, self.args.max_cpu_temp),
             f"FPS {self.fps_estimate:.0f}" if self.fps_estimate > 0 else "FPS --",
+        ]
+        audio_status = self._audio_status_line()
+        if audio_status is not None:
+            right_lines.append(audio_status)
+        right_lines.extend([
             self._format_uptime(),
             "THERMAL HOLD OFF" if self.args.no_thermal_hold else "THERMAL HOLD ARMED",
-        ]
+        ])
         return left_lines, right_lines
 
     def _build_hud_texture(self) -> None:
@@ -869,30 +1043,44 @@ class GarageHeatShow(mglw.WindowConfig):
             self._sync_static_uniforms()
 
         self._refresh_window_title()
+        audio_values = self._refresh_audio_textures()
 
         animated_time = time_value * self.args.anim_speed
         substeps = max(1, self.args.substeps)
         for _ in range(substeps):
-            self._step_simulation(animated_time)
-        self._render_display(animated_time)
+            self._step_simulation(animated_time, audio_values)
+        self._render_display(animated_time, audio_values)
 
-    def _step_simulation(self, animated_time: float) -> None:
+    def _step_simulation(self, animated_time: float, audio_values) -> None:
         current = self.state_textures[self.active_state]
         next_index = 1 - self.active_state
         target_fbo = self.framebuffers[next_index]
         target_fbo.use()
         self.ctx.viewport = (0, 0, *current.size)
         current.use(location=0)
+        if audio_values is not None and self.audio_fft_tex is not None:
+            energy, bass, treble = audio_values
+            self.audio_fft_tex.use(location=1)
+            self._set_uniform(self.update_program, "audioEnergy", energy)
+            self._set_uniform(self.update_program, "audioBass", bass)
+            self._set_uniform(self.update_program, "audioTreble", treble)
         self._set_uniform(self.update_program, "time", animated_time)
         self._set_uniform(self.update_program, "feed", self.args.feed)
         self._set_uniform(self.update_program, "kill", self.args.kill)
         self.quad.render(self.update_program)
         self.active_state = next_index
 
-    def _render_display(self, animated_time: float) -> None:
+    def _render_display(self, animated_time: float, audio_values) -> None:
         self._display_target().use()
         self.ctx.viewport = (0, 0, *self.wnd.buffer_size)
         self.state_textures[self.active_state].use(location=0)
+        if audio_values is not None and self.audio_fft_tex is not None and self.audio_wave_tex is not None:
+            energy, bass, treble = audio_values
+            self.audio_fft_tex.use(location=1)
+            self.audio_wave_tex.use(location=2)
+            self._set_uniform(self.display_program, "audioEnergy", energy)
+            self._set_uniform(self.display_program, "audioBass", bass)
+            self._set_uniform(self.display_program, "audioTreble", treble)
         self._set_uniform(self.display_program, "time", animated_time)
         self._set_uniform(self.display_program, "colorShift", (
             animated_time * self.args.color_shift_speed
@@ -927,6 +1115,15 @@ class GarageHeatShow(mglw.WindowConfig):
         for thread in self.cpu_threads:
             thread.join(timeout=1.0)
         self.cpu_threads.clear()
+        if self.audio is not None:
+            self.audio.destroy()
+            self.audio = None
+        if self.audio_fft_tex is not None:
+            self.audio_fft_tex.release()
+            self.audio_fft_tex = None
+        if self.audio_wave_tex is not None:
+            self.audio_wave_tex.release()
+            self.audio_wave_tex = None
         if self.hold_texture is not None:
             self.hold_texture.release()
             self.hold_texture = None

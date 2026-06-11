@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 from . import (
+    audio_reactive_3d,
     muddy_asteroid_planet_3d,
     neural_plane_3d,
     original_2d,
@@ -17,6 +18,7 @@ from .spec import WorldSpec
 DEFAULT_WORLD_ID = "original-tuned-3d"
 
 _WORLD_ORDER: tuple[WorldSpec, ...] = (
+    audio_reactive_3d.SPEC,
     static_sandstorm_3d.SPEC,
     tsunami_land_3d.SPEC,
     muddy_asteroid_planet_3d.SPEC,

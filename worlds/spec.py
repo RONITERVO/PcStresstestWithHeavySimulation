@@ -22,3 +22,4 @@ class WorldSpec:
     stability_notes: Sequence[str] = field(default_factory=tuple)
     hud_subtitle: str = "3D VOLUMETRIC STRESS"
     preview_palette: Sequence[str] = field(default_factory=tuple)
+    uses_audio: bool = False
