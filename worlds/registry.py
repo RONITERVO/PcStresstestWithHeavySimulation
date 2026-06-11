@@ -8,6 +8,7 @@ from . import (
     Final_minecraft_3D,
     living_sketchbook_3d,
     minecraft_3d,
+    minecraft_fluid,
     minecraft_long_term_3d,
     muddy_asteroid_planet_3d,
     neural_plane_3d,
@@ -24,6 +25,7 @@ from .spec import WorldSpec
 DEFAULT_WORLD_ID = "minecraft-long-term-3d"
 
 _WORLD_ORDER: tuple[WorldSpec, ...] = (
+    minecraft_fluid.SPEC,
     Final_minecraft_3D.SPEC,
     minecraft_long_term_3d.SPEC,
     minecraft_3d.SPEC,
