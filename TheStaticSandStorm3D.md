@@ -109,6 +109,7 @@ SIM_FRAG_SHADER = """
 #version 450
 in vec2 uv;
 out vec4 fragColor;
+
 uniform sampler2D stateTex;
 uniform vec2 resolution;
 uniform float time;
@@ -118,60 +119,113 @@ uniform float diffU;
 uniform float diffV;
 uniform float dt;
 uniform float laplaceScale;
-uniform float noiseStrength;
-uniform float parameterDrift;
 
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+// PRNG
+float hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * .1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
 }
 
-// Fluid advection based on terrain topography
+vec2 getEventTarget(float id, float seed) {
+    return vec2(hash12(vec2(id, seed)), hash12(vec2(id, seed + 1.0)));
+}
+
 void main() {
     vec2 texel = 1.0 / resolution;
 
-    vec4 c = texture(stateTex, uv);
-    vec4 r = texture(stateTex, uv + vec2(texel.x, 0.0));
-    vec4 l = texture(stateTex, uv - vec2(texel.x, 0.0));
-    vec4 t = texture(stateTex, uv + vec2(0.0, texel.y));
-    vec4 b = texture(stateTex, uv - vec2(0.0, texel.y));
-    vec4 tr = texture(stateTex, uv + texel);
+    // Channels:
+    // R (x): Deep Moisture/Oasis Reserve (U)
+    // G (y): Cacti & Desert Flora (V)
+    // B (z): Topography/Sand Dunes
+    // A (w): Geothermal Heat & Cosmic Energy
+
+    vec4 c  = texture(stateTex, uv);
+    vec4 r  = texture(stateTex, uv + vec2(texel.x, 0.0));
+    vec4 l  = texture(stateTex, uv - vec2(texel.x, 0.0));
+    vec4 t  = texture(stateTex, uv + vec2(0.0, texel.y));
+    vec4 b_ = texture(stateTex, uv - vec2(0.0, texel.y));
+    vec4 tr = texture(stateTex, uv + vec2(texel.x, texel.y));
     vec4 tl = texture(stateTex, uv + vec2(-texel.x, texel.y));
     vec4 br = texture(stateTex, uv + vec2(texel.x, -texel.y));
     vec4 bl = texture(stateTex, uv - texel);
 
-    // Compute standard laplacian
-    float lapU = (r.r + l.r + t.r + b.r) * 0.2 + (tr.r + tl.r + br.r + bl.r) * 0.05 - c.r;
-    float lapV = (r.g + l.g + t.g + b.g) * 0.2 + (tr.g + tl.g + br.g + bl.g) * 0.05 - c.g;
+    float lapU = (r.x + l.x + t.x + b_.x) * 0.2 + (tr.x + tl.x + br.x + bl.x) * 0.05 - c.x;
+    float lapV = (r.y + l.y + t.y + b_.y) * 0.2 + (tr.y + tl.y + br.y + bl.y) * 0.05 - c.y;
+    float lapH = (r.z + l.z + t.z + b_.z) * 0.2 + (tr.z + tl.z + br.z + bl.z) * 0.05 - c.z;
+    float lapA = (r.w + l.w + t.w + b_.w) * 0.2 + (tr.w + tl.w + br.w + bl.w) * 0.05 - c.w;
 
-    // Terrain Gradient (channel B is height, channel A is settlement/city energy)
-    vec2 gradH = vec2(r.b - l.b, t.b - b.b);
+    vec2 gradH = vec2(r.z - l.z, t.z - b_.z);
 
-    // Compute advection vectors (chemicals flow down height gradients)
-    float flowStrength = 0.8;
-    float advectU = dot(gradH, vec2(r.r - l.r, t.r - b.r)) * flowStrength;
-    float advectV = dot(gradH, vec2(r.g - l.g, t.g - b.g)) * flowStrength;
+    // Wind Advection: broad desert winds turn slowly over time.
+    float windAngle = 0.35 + sin(time * 0.037) * 0.72 + sin(time * 0.013 + 1.7) * 0.38;
+    vec2 windDir = normalize(vec2(cos(windAngle), sin(windAngle)));
+    float flow = 0.8;
+    float windErosion = dot(windDir, gradH) * flow;
 
-    float wetNoise = (hash(uv * resolution + floor(time * 0.35)) - 0.5) * noiseStrength;
+    // Matter still naturally slips downhill slightly
+    float advectU = dot(gradH, vec2(r.x - l.x, t.x - b_.x)) * flow * 0.2;
+    float advectV = dot(gradH, vec2(r.y - l.y, t.y - b_.y)) * flow * 0.2;
 
-    // Add local chaotic drift
-    float localFeed = feed + c.a * 0.015 * sin(time * 0.1 + uv.x * 20.0) + wetNoise * 0.18;
-    float localKill = kill + (1.0 - c.a) * 0.01 * cos(time * 0.15 + uv.y * 15.0) + parameterDrift * 0.6;
+    // Cosmic Events (Meteors hitting the desert)
+    float eventInterval = 8.0;
+    float eventId = floor(time / eventInterval);
+    float eventLocalTime = fract(time / eventInterval) * eventInterval;
+    vec2 mTarget = getEventTarget(eventId, 42.0);
+    float mDist = length(uv - mTarget);
 
-    // Growth based on moisture
-    float reaction = c.r * c.g * c.g;
+    float meteorStrike = 0.0;
+    float cratering = 0.0;
+    float shockwave = 0.0;
 
-    // Integration
-    float du = (diffU * lapU * laplaceScale) - reaction + localFeed * (1.0 - c.r) - advectU;
-    float dv = (diffV * lapV * laplaceScale) + reaction - (localFeed + localKill) * c.g - advectV;
+    float strikePulse = exp(-pow((eventLocalTime - 7.08) * 48.0, 2.0));
+    float craterCore = 1.0 - smoothstep(0.0, 0.035, mDist);
+    float heatCore = 1.0 - smoothstep(0.012, 0.080, mDist);
+    float shockCore = 1.0 - smoothstep(0.040, 0.150, mDist);
+    float ejectaRing = smoothstep(0.020, 0.040, mDist) * (1.0 - smoothstep(0.040, 0.065, mDist));
 
-    // Modify terrain height organically over time based on biomass (V)
-    float dh = (c.g * 0.01 - 0.002 + wetNoise * 0.015) * dt * c.a;
+    // Deeper craters in sand, massive ejecta ring
+    cratering = strikePulse * (-0.050 * craterCore + 0.025 * ejectaRing);
+    meteorStrike = strikePulse * 0.060 * heatCore;
+    // Shockwave devastates nearby cacti
+    shockwave = -c.y * 0.030 * strikePulse * shockCore;
+
+    // Geothermal Activity (Volcanoes)
+    float geothermalDrift = (hash12(uv + time * 0.01) - 0.49) * 0.01;
+    float heatGain = (c.w > 0.6 ? 0.005 : -0.001) + geothermalDrift;
+
+    float eruptionH = 0.0;
+    float eruptionHeat = 0.0;
+    float eruptionKill = 0.0;
+
+    vec2 eruptionCell = floor(uv * resolution / 4.0);
+    float eruptionSeed = hash12(eruptionCell + floor(time * 0.5));
+    float eruptionPulse = smoothstep(0.92, 1.0, c.w) * step(0.998, eruptionSeed);
+    eruptionH = 0.015 * eruptionPulse;
+    eruptionHeat = 0.050 * eruptionPulse;
+    eruptionKill = -c.y * 0.025 * eruptionPulse;
+
+    // Gray-Scott Reaction with ecological coupling
+    float reaction = c.x * c.y * c.y;
+
+    // Sahara Desert coupling: Moisture (c.x) is rare, cacti feed slowly, high heat kills
+    float desertFeed = feed + (c.x * 0.01) - abs(c.w - 0.2) * 0.008;
+    float desertKill = kill + c.w * 0.025;
+
+    float du = (diffU * lapU * laplaceScale) - reaction + desertFeed * (1.0 - c.x) - advectU;
+    float dv = (diffV * lapV * laplaceScale) + reaction - (desertFeed + desertKill) * c.y - advectV + shockwave + eruptionKill;
+
+    // Topography shifts slowly via wind erosion and violently via meteor events
+    float dh = lapH * 0.015 + (c.y * 0.001 - 0.0005) * dt + cratering + eruptionH - windErosion * dt * 0.05;
+
+    // Heat diffusion and accumulation
+    float dw = (0.25 * lapA) + heatGain + meteorStrike + eruptionHeat - (c.x * 0.003);
 
     fragColor = vec4(
-        clamp(c.r + du * dt, 0.0, 1.0),
-        clamp(c.g + dv * dt, 0.0, 1.0),
-        clamp(c.b + dh * dt, 0.0, 1.0),
-        c.a
+        clamp(c.x + du * dt, 0.0, 1.0),
+        clamp(c.y + dv * dt, 0.0, 1.0),
+        clamp(c.z + dh * dt, 0.0, 1.0),
+        clamp(c.w + dw * dt, 0.0, 1.0)
     );
 }
 """
@@ -180,6 +234,7 @@ DISPLAY_FRAG_SHADER = """
 #version 450
 in vec2 uv;
 out vec4 fragColor;
+
 uniform sampler2D stateTex;
 uniform vec2 resolution;
 uniform float time;
@@ -187,27 +242,14 @@ uniform float exposure;
 uniform float glow;
 uniform float gamma;
 uniform float contourContrast;
-uniform float colorShift;
 uniform float cameraSpeed;
 uniform float fxIntensity;
 uniform int raySteps;
 
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(41.7, 289.1))) * 45758.5453);
-}
+#define MAX_STEPS 160
+#define MAX_DIST 40.0
+#define SURF_DIST 0.002
 
-float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
-
-// Raymarching camera and environment setup
 mat3 setCamera(in vec3 ro, in vec3 ta, float cr) {
     vec3 cw = normalize(ta - ro);
     vec3 cp = vec3(sin(cr), cos(cr), 0.0);
@@ -216,186 +258,359 @@ mat3 setCamera(in vec3 ro, in vec3 ta, float cr) {
     return mat3(cu, cv, cw);
 }
 
-// Terrain SDF derived from the 2D simulation texture
-float map(in vec3 p, out float matID, out vec4 stateOut) {
-    // Scale world to texture UVs
-    vec2 mapUV = p.xz * 0.04;
+float hash12(vec2 p) {
+    vec3 p3  = fract(vec3(p.xyx) * .1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+float noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash12(i + vec2(0.0, 0.0)), hash12(i + vec2(1.0, 0.0)), f.x),
+               mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+
+float fbm(vec2 p) {
+    float v = 0.0;
+    float a = 0.5;
+    mat2 rot = mat2(0.866, -0.5, 0.5, 0.866);
+    for (int i = 0; i < 4; i++) {
+        v += a * noise(p);
+        p = rot * p * 2.0 + vec2(100.0);
+        a *= 0.5;
+    }
+    return v;
+}
+
+vec2 getEventTarget(float id, float seed) {
+    return vec2(hash12(vec2(id, seed)), hash12(vec2(id, seed + 1.0)));
+}
+
+vec2 rotate2(vec2 v, float a) {
+    float s = sin(a);
+    float c = cos(a);
+    return vec2(c * v.x - s * v.y, s * v.x + c * v.y);
+}
+
+vec2 windField(vec2 xz, out float gust) {
+    float regional = fbm(vec2(time * 0.021, 4.7)) * 6.28318;
+    regional += sin(time * 0.039) * 0.95 + sin(time * 0.011 + 2.1) * 0.65;
+    vec2 baseDir = normalize(vec2(cos(regional), sin(regional)));
+
+    float shear = (fbm(xz * 0.018 + vec2(time * 0.026, -time * 0.011)) - 0.5) * 2.1;
+    shear += (fbm(xz * 0.070 - baseDir * time * 0.045) - 0.5) * 0.85;
+    vec2 localDir = normalize(rotate2(baseDir, shear));
+
+    float gustBands = fbm(xz * 0.032 - localDir * time * 0.12);
+    float gustFront = pow(max(sin(dot(xz, localDir) * 0.050 - time * 0.82 + fbm(xz * 0.010) * 6.0), 0.0), 5.0);
+    gust = clamp(0.35 + gustBands * 1.15 + gustFront * 1.1, 0.2, 2.5);
+    return localDir;
+}
+
+float asteroidDust(vec2 xz, float hTerrain, float safeFx, vec2 windDir, float gust, float eventId, float age, out float front, out float plume) {
+    front = 0.0;
+    plume = 0.0;
+    if (age <= 0.0 || age > 6.0) return 0.0;
+
+    vec2 impact = getEventTarget(eventId, 42.0) / 0.03;
+    vec2 crossDir = vec2(-windDir.y, windDir.x);
+    float radius = age * mix(4.5, 12.5, clamp(gust * 0.45, 0.0, 1.0));
+    float width = 0.9 + age * (0.55 + gust * 0.28);
+    float dist = length(xz - impact);
+    float shock = exp(-pow((dist - radius) / max(width, 0.25), 2.0));
+
+    vec2 advectedCenter = impact + windDir * (age * age * (2.2 + gust * 2.4));
+    vec2 rel = xz - advectedCenter;
+    float along = dot(rel, windDir);
+    float cross = dot(rel, crossDir);
+    float tail = smoothstep(-1.2, 4.5 + age * 1.6, along) * exp(-max(along, 0.0) / (8.0 + age * 6.0));
+    float spread = exp(-pow(cross / (1.0 + age * (0.9 + gust * 0.35)), 2.0));
+    float curl = fbm(xz * 0.22 - windDir * time * (0.45 + gust * 0.25) + vec2(eventId * 7.3));
+    plume = tail * spread * (0.45 + curl * 0.75);
+
+    float terrainPickup = smoothstep(0.18, 3.0, hTerrain);
+    float fade = exp(-age * 0.18);
+    front = shock * terrainPickup * fade;
+    plume *= terrainPickup * fade;
+
+    return (front * 3.4 + plume * 2.6) * safeFx;
+}
+
+float sandStormWave(vec2 xz, float hTerrain, float safeFx, out float crest, out float trough) {
+    float gust;
+    vec2 windDir = windField(xz, gust);
+    vec2 crossDir = vec2(-windDir.y, windDir.x);
+    float along = dot(xz, windDir);
+    float cross = dot(xz, crossDir);
+    float travel = along * 0.22 - time * (0.85 + gust * 0.95 + safeFx * 0.18);
+    travel += fbm(vec2(cross * 0.045, along * 0.021) + windDir * time * 0.11) * 4.0;
+
+    float cycle = sin(travel);
+    crest = pow(max(cycle, 0.0), 3.0);
+    trough = pow(max(-sin(travel - 0.45), 0.0), 2.0);
+
+    float broadLift = (fbm(xz * 0.075 - windDir * time * 0.22) - 0.44) * (0.60 + gust * 0.42);
+    float saltation = (fbm(xz * 1.7 - windDir * time * (1.5 + gust * 0.8)) - 0.5) * 0.16;
+    float rollingFront = pow(max(sin(along * 0.070 - time * (0.45 + gust * 0.38) + fbm(xz * 0.018) * 6.0), 0.0), 7.0);
+
+    float eventInterval = 8.0;
+    float eventId = floor(time / eventInterval);
+    float eventLocalTime = fract(time / eventInterval) * eventInterval;
+    float impactOffset = 7.08;
+
+    float frontA; float plumeA;
+    float asteroidMain = asteroidDust(xz, hTerrain, safeFx, windDir, gust, eventId, eventLocalTime - impactOffset, frontA, plumeA);
+
+    float frontB; float plumeB;
+    float asteroidCarry = asteroidDust(xz, hTerrain, safeFx, windDir, gust, eventId - 1.0, eventLocalTime + eventInterval - impactOffset, frontB, plumeB);
+
+    float asteroidStorm = asteroidMain + asteroidCarry * 0.75;
+    float ambientStorm = crest * (0.55 + gust * 0.55) + rollingFront * (0.75 + gust * 0.38);
+    float drawdown = trough * (0.20 + gust * 0.13);
+
+    crest = clamp(max(max(crest * 0.55, rollingFront), max(frontA, frontB) + max(plumeA, plumeB) * 0.45), 0.0, 1.0);
+    trough = clamp(gust * 0.34 + max(plumeA, plumeB) * 0.35, 0.0, 1.0);
+    return broadLift + saltation + ambientStorm * safeFx - drawdown + asteroidStorm;
+}
+
+float map(in vec3 p, out int matID, out vec4 stateOut) {
+    vec2 mapUV = p.xz * 0.03;
     vec4 state = textureLod(stateTex, mapUV, 0.0);
 
-    // Terrain height (b) and biomass extrusion (g)
+    // R: Deep Moisture, G: Cacti, B: Sand Height, A: Heat
     float safeFx = clamp(fxIntensity, 0.2, 1.6);
-    float baseHeight = state.b * mix(2.7, 3.9, safeFx);
-    float biomassExtrusion = smoothstep(0.16, 0.86, state.g) * mix(0.85, 2.15, safeFx);
-    float h = baseHeight + biomassExtrusion;
+    float detailFx = smoothstep(0.2, 1.6, safeFx);
 
-    // Add high frequency fractal noise for detail
-    float detail = sin(p.x * 8.0) * cos(p.z * 8.3) * 0.035 + sin(p.x * 15.0) * cos(p.z * 14.1) * 0.014;
-    detail += (noise(p.xz * 2.4 + time * 0.02) - 0.5) * 0.045;
-    h += detail * smoothstep(0.2, 0.8, state.b) * safeFx;
+    // Terrain definition
+    float baseH = state.z * mix(2.6, 3.8, detailFx);
 
-    float dTerrain = p.y - h;
+    // Sand Dunes (Fractal ridges)
+    float duneNoise = 1.0 - abs(fbm(p.xz * 0.8 + vec2(time * 0.02)) * 2.0 - 1.0);
+    float duneRelief = pow(duneNoise, 1.8) * mix(0.4, 1.4, detailFx);
 
-    // Water plane
-    float dWater = p.y - 1.55;
+    // Cacti (Sparse, tall spiky displacements based on Biomass G)
+    float cactiMask = smoothstep(0.4, 0.8, state.y);
+    float spike = fbm(p.xz * 45.0);
+    float cactiDetail = smoothstep(0.6, 1.0, spike) * cactiMask * 1.2 * detailFx;
 
-    if (dTerrain < dWater) {
-        matID = 1.0; // Terrain/Organics
+    // Craters and Volcanic Peaks (Displacement based on Heat A)
+    float rockyDetail = fbm(p.xz * 6.0) * mix(0.15, 0.45, detailFx) * smoothstep(0.3, 1.0, state.w);
+
+    float continentLift = smoothstep(0.4, 0.7, fbm(p.xz * 0.05 + vec2(19.0, 7.0)));
+    float microRelief = (fbm(p.xz * 2.5 + vec2(3.0)) - 0.5) * mix(0.04, 0.15, detailFx);
+
+    float hTerrain = baseH + duneRelief + cactiDetail + rockyDetail + microRelief + continentLift * mix(0.3, 1.2, detailFx);
+    float dTerrain = p.y - hTerrain;
+
+    // Sandstorm replaces the ocean logic: sweeping waves of dense dust.
+    float crest; float trough;
+    float stormLift = sandStormWave(p.xz, hTerrain, safeFx, crest, trough);
+    float hStorm = hTerrain + max(0.0, stormLift);
+
+    float dStorm = p.y - hStorm;
+
+    if (dTerrain < dStorm) {
+        matID = 1; // Solid Terrain / Cacti
         stateOut = state;
-        return dTerrain * 0.72; // Under-relax to prevent missed intersections on steep heightmaps
+        return dTerrain * 0.6; // Under-relax for terrain details
     } else {
-        matID = 0.0; // Water
+        matID = 0; // Dense Sandstorm Volume
         stateOut = state;
-        return dWater * 0.9;
+        return dStorm * 0.9;
     }
 }
 
 vec3 calcNormal(in vec3 p) {
-    const float eps = 0.04;
-    const vec2 h = vec2(eps, 0);
-    float dummyMat; vec4 dummyState;
+    const vec2 h = vec2(0.01, 0.0);
+    int dMat; vec4 dState;
     return normalize(vec3(
-        map(p + h.xyy, dummyMat, dummyState) - map(p - h.xyy, dummyMat, dummyState),
-        map(p + h.yxy, dummyMat, dummyState) - map(p - h.yxy, dummyMat, dummyState),
-        map(p + h.yyx, dummyMat, dummyState) - map(p - h.yyx, dummyMat, dummyState)
+        map(p + h.xyy, dMat, dState) - map(p - h.xyy, dMat, dState),
+        map(p + h.yxy, dMat, dState) - map(p - h.yxy, dMat, dState),
+        map(p + h.yyx, dMat, dState) - map(p - h.yyx, dMat, dState)
     ));
 }
 
 float calcShadow(in vec3 ro, in vec3 rd) {
     float res = 1.0;
-    float t = 0.1;
-    float dummyMat; vec4 dummyState;
-    for (int i = 0; i < 40; i++) {
-        float h = map(ro + rd * t, dummyMat, dummyState);
-        res = min(res, 8.0 * h / t);
-        t += clamp(h, 0.05, 0.75);
-        if (h < 0.001 || t > 10.0) break;
+    float t = 0.05;
+    int dMat; vec4 dState;
+    for (int i = 0; i < 32; i++) {
+        float h = map(ro + rd * t, dMat, dState);
+        res = min(res, 12.0 * h / t);
+        t += clamp(h, 0.02, 0.5);
+        if (h < 0.001 || t > 15.0) break;
     }
     return clamp(res, 0.0, 1.0);
 }
 
 void main() {
     vec2 p = (-resolution.xy + 2.0 * gl_FragCoord.xy) / resolution.y;
-
     float safeFx = clamp(fxIntensity, 0.2, 1.6);
-    int safeRaySteps = clamp(raySteps, 32, 160);
+    float contourPower = clamp(contourContrast, 0.0, 1.6);
+    int maxRaySteps = clamp(raySteps, 32, MAX_STEPS);
 
-    // Smooth cinematic camera movement
-    float camTime = time * 0.15 * max(cameraSpeed, 0.05);
-    vec3 ro = vec3(camTime * 5.0, 7.0 + sin(camTime * 0.5) * 1.2, camTime * 4.0);
-    vec3 ta = vec3(ro.x + 4.8, 2.1, ro.z + 4.8 + sin(camTime));
+    float camTime = time * 0.12 * max(cameraSpeed, 0.01);
+    vec3 ro = vec3(camTime * 6.0, 8.5 + sin(camTime * 0.4) * 1.5, camTime * 5.0);
+    vec3 ta = vec3(ro.x + 6.0, 2.5, ro.z + 5.0 + sin(camTime * 0.8) * 2.0);
 
-    mat3 ca = setCamera(ro, ta, sin(camTime * 0.3) * 0.1);
+    mat3 ca = setCamera(ro, ta, sin(camTime * 0.25) * 0.12);
     vec3 rd = ca * normalize(vec3(p.xy, 2.0));
 
-    // Environment
-    vec3 lightDir = normalize(vec3(0.8, 0.62, -0.4));
-    float sun = pow(max(0.0, dot(rd, lightDir)), 220.0);
-    float skyRise = smoothstep(-0.2, 0.9, rd.y);
-    vec3 skyColor = mix(vec3(0.008, 0.014, 0.032), vec3(0.09, 0.18, 0.31), skyRise);
-    skyColor += vec3(1.00, 0.72, 0.36) * sun * (0.8 + safeFx * 0.8);
-    float aurora = smoothstep(0.74, 0.98, rd.y + 0.12 * sin(p.x * 3.0 + time * 0.22));
-    aurora *= 0.5 + 0.5 * sin(p.x * 9.0 + time * 0.65 + colorShift);
-    skyColor += aurora * vec3(0.08, 0.55, 0.46) * safeFx;
+    // Scorching desert sun
+    vec3 lightDir = normalize(vec3(0.6, 0.7, -0.4));
 
-    // Raymarching
-    float tMax = 50.0;
+    // Meteor Sky Event
+    float eventInterval = 8.0;
+    float eventId = floor(time / eventInterval);
+    float eventLocalTime = fract(time / eventInterval) * eventInterval;
+
+    // Dusty Sahara Sky
+    vec3 skyColor = mix(vec3(0.70, 0.45, 0.25), vec3(0.95, 0.75, 0.55), rd.y * 0.5 + 0.5);
+    float sun = pow(max(0.0, dot(rd, lightDir)), 80.0);
+    skyColor += vec3(1.0, 0.9, 0.7) * sun * safeFx;
+
+    // Meteor entry flash
+    if (eventLocalTime > 6.0 && eventLocalTime < 7.5) {
+        vec2 mTargetUV = getEventTarget(eventId, 42.0);
+        vec3 mTargetWorld = vec3(mTargetUV.x / 0.03, 0.0, mTargetUV.y / 0.03);
+
+        vec3 meteorStart = mTargetWorld + vec3(25.0, 50.0, -25.0);
+        vec3 meteorEnd = mTargetWorld;
+
+        float dropPhase = smoothstep(6.0, 7.08, eventLocalTime);
+        vec3 mPos = mix(meteorStart, meteorEnd, dropPhase);
+
+        vec3 mDir = normalize(meteorEnd - meteorStart);
+        float mProj = max(0.0, dot(rd, normalize(mPos - ro)));
+
+        float flash = exp(-pow(eventLocalTime - 7.08, 2.0) * 120.0);
+        skyColor += vec3(1.0, 0.6, 0.2) * pow(mProj, 700.0) * 12.0 * (1.0 - flash);
+        skyColor += vec3(1.0, 0.8, 0.5) * flash * 6.0 * safeFx; // Global flash over the desert
+    }
+
     float t = 0.0;
-    float matID = -1.0;
+    int matID = -1;
     vec4 state = vec4(0.0);
     vec3 volumeGlow = vec3(0.0);
 
-    for (int i = 0; i < 160; i++) {
-        if (i >= safeRaySteps) break;
+    for (int i = 0; i < MAX_STEPS; i++) {
+        if (i >= maxRaySteps) break;
         vec3 pos = ro + rd * t;
-        float currMat; vec4 currState;
+        int currMat; vec4 currState;
         float h = map(pos, currMat, currState);
 
-        // Volumetric bioluminescence accumulation (V concentration)
-        if (currMat == 1.0) {
-            float bio = smoothstep(0.2, 0.8, currState.g);
-            vec3 emColor = mix(vec3(0.0, 1.0, 0.8), vec3(1.0, 0.2, 0.5), currState.r);
-            volumeGlow += emColor * bio * (0.012 + glow * 0.003) * safeFx / (1.0 + abs(h) * 10.0);
+        // Volumetrics
+        if (currMat == 1) {
+            // Volcanic Lava / Smoldering Craters (A)
+            float heat = smoothstep(0.7, 1.0, currState.w);
+            vec3 lavaGlow = vec3(1.0, 0.35, 0.05);
+            volumeGlow += lavaGlow * heat * (0.025 + glow * 0.01) * safeFx / (1.0 + abs(h) * 6.0);
+
+            // Heat Haze / Dust near oases (R)
+            float oasis = smoothstep(0.3, 0.8, currState.x);
+            volumeGlow += vec3(0.7, 0.5, 0.3) * oasis * 0.01 * safeFx / (1.0 + abs(h) * 8.0);
         }
 
-        if (h < max(0.003, 0.0015 * t) || t > tMax) {
+        if (h < SURF_DIST * (1.0 + t * 0.1) || t > MAX_DIST) {
             matID = currMat;
             state = currState;
             break;
         }
-        t += clamp(h, 0.035, 0.85);
+        t += clamp(h, 0.02, 0.8);
     }
 
     vec3 color = skyColor;
 
-    if (t < tMax) {
+    if (t < MAX_DIST) {
         vec3 pos = ro + rd * t;
         vec3 nor = calcNormal(pos);
 
-        // Lighting
         float occ = clamp(0.5 + 0.5 * nor.y, 0.0, 1.0);
-        float sha = calcShadow(pos + nor * 0.01, lightDir);
+        float sha = calcShadow(pos + nor * 0.02, lightDir);
         float dif = clamp(dot(nor, lightDir), 0.0, 1.0) * sha;
         float sky = clamp(0.5 + 0.5 * nor.y, 0.0, 1.0);
-        float fre = pow(clamp(1.0 + dot(nor, rd), 0.0, 1.0), 2.0);
+        float fre = pow(clamp(1.0 + dot(nor, rd), 0.0, 1.0), 3.0);
 
-        // Materials
         vec3 matColor;
-        if (matID == 1.0) {
-            // Terrain & Organics
-            vec3 rock = vec3(0.1, 0.12, 0.15);
-            vec3 sand = vec3(0.3, 0.25, 0.18);
-            vec3 bio = mix(vec3(0.05, 0.2, 0.15), vec3(0.8, 1.0, 0.9), state.g);
+        vec3 emission = vec3(0.0);
 
-            matColor = mix(rock, sand, smoothstep(0.4, 0.6, nor.y));
-            matColor = mix(matColor, bio, smoothstep(0.1, 0.5, state.g));
+        if (matID == 1) {
+            // Sahara Sand Base Terrain
+            vec3 sandBase = vec3(0.78, 0.56, 0.35);
+            vec3 sandShadow = vec3(0.48, 0.30, 0.18);
+            matColor = mix(sandShadow, sandBase, smoothstep(0.2, 0.9, nor.y));
 
-            // Bioluminescence emission on surface
-            vec3 bioGlow = mix(vec3(0.0, 0.9, 0.7), vec3(1.0, 0.13, 0.42), state.r);
-            float pulse = 1.0 + 0.5 * sin(time * 3.0 - pos.x + colorShift * 3.0);
-            matColor += bioGlow * pow(state.g, 3.0) * (1.6 + glow * 0.65) * pulse * safeFx;
-            matColor += vec3(1.0, 0.72, 0.22) * pow(state.a, 2.0) * (1.0 + glow * 0.45) * safeFx;
-            float contour = 1.0 - smoothstep(0.018, 0.045 + contourContrast * 0.03, abs(fract(state.b * 18.0) - 0.5));
-            matColor += contour * vec3(0.08, 0.12, 0.11) * contourContrast;
+            // Cacti (Biomass G)
+            vec3 flora = vec3(0.15, 0.42, 0.20);
+            float isCactus = smoothstep(0.5, 0.9, state.y) * smoothstep(0.5, 1.0, fbm(pos.xz * 45.0));
+            matColor = mix(matColor, flora, isCactus);
+
+            // Burned Earth & Meteor Glass (A)
+            vec3 obsidian = vec3(0.12, 0.08, 0.06);
+            float heatGlass = smoothstep(0.6, 0.9, state.w);
+            matColor = mix(matColor, obsidian, heatGlass);
+
+            // Add shiny glass reflection inside craters
+            float glassSpec = pow(clamp(dot(reflect(rd, nor), lightDir), 0.0, 1.0), 64.0) * heatGlass * sha;
+            emission += vec3(1.0, 0.8, 0.6) * glassSpec * 1.5;
+
+            // Wind ripples (contour mapping)
+            float ripple = (1.0 - smoothstep(0.0, 0.06, abs(fract((pos.x * 0.6 + pos.z * 0.4 + pos.y * 1.5) * 6.0) - 0.5))) * contourPower;
+            matColor += vec3(0.18, 0.10, 0.05) * ripple * 0.25;
+
+            // Lava Emission (A)
+            float lavaMask = smoothstep(0.85, 1.0, state.w);
+            emission += vec3(2.5, 0.7, 0.1) * lavaMask * (1.0 + 0.3 * sin(time * 6.0 + pos.x)) * safeFx;
+
         } else {
-            // Water
-            float depth = clamp((1.55 - state.b * 3.7) * 0.5, 0.0, 1.0);
-            vec3 shallow = vec3(0.0, 0.4, 0.5);
-            vec3 deep = vec3(0.0, 0.05, 0.15);
-            matColor = mix(shallow, deep, depth);
-            matColor += vec3(0.05, 0.24, 0.22) * (0.5 + 0.5 * sin(pos.x * 3.0 + pos.z * 2.0 + time * 1.3)) * safeFx;
+            // Sandstorm Wave
+            float waveCrest; float waveTrough;
+            float approximateTerrain = state.z * 3.25 + 1.10;
+            float stormLift = sandStormWave(pos.xz, approximateTerrain, safeFx, waveCrest, waveTrough);
+            float stormDepth = max(0.18, max(stormLift, 0.0));
+            float verticalFill = 1.0 - clamp((pos.y - approximateTerrain) / stormDepth, 0.0, 1.0);
+            float stormDensity = clamp(verticalFill * 0.82 + waveTrough * 0.22 + waveCrest * 0.38, 0.0, 1.0);
 
-            // Specular
+            vec3 dustThick = vec3(0.42, 0.26, 0.14);
+            vec3 dustLight = vec3(0.85, 0.65, 0.45);
+            matColor = mix(dustThick, dustLight, stormDensity);
+
+            float swirl = smoothstep(0.4, 0.8, fbm(pos.xz * 2.5 + vec2(time * 0.6, -time * 0.3)));
+            matColor = mix(matColor, vec3(0.9, 0.75, 0.55), clamp(waveCrest * (0.4 + swirl * 0.6), 0.0, 0.8));
+
             vec3 ref = reflect(rd, nor);
-            float spe = pow(clamp(dot(ref, lightDir), 0.0, 1.0), 32.0) * sha;
-            matColor += vec3(1.0) * spe * 0.5;
+            float spe = pow(clamp(dot(ref, lightDir), 0.0, 1.0), 8.0) * sha; // Rough, broad specular for dust
+            emission += vec3(0.6, 0.5, 0.4) * spe * 0.3 * waveCrest;
 
-            // Reflected bioluminescence
-            matColor += volumeGlow * 0.18;
+            // Ambient scattering within the dust wave
+            emission += vec3(0.8, 0.5, 0.3) * waveCrest * safeFx * 0.4;
+            emission += volumeGlow * 0.4;
         }
 
         vec3 lin = vec3(0.0);
-        lin += 2.15 * dif * vec3(1.0, 0.88, 0.76);
-        lin += 0.55 * sky * vec3(0.20, 0.32, 0.45) * occ;
-        lin += 0.2 * fre * vec3(1.0);
+        lin += 1.8 * dif * vec3(1.0, 0.9, 0.8);
+        lin += 0.8 * sky * vec3(0.5, 0.4, 0.3) * occ; // Warm ambient
+        lin += 0.4 * fre * vec3(0.9, 0.8, 0.7) * occ;
 
-        color = matColor * lin;
+        color = matColor * lin + emission;
 
-        // Add atmospheric fog
-        float fog = 1.0 - exp(-0.0016 * t * t);
+        // Thick sandy fog in the distance
+        float fog = 1.0 - exp(-0.0012 * t * t);
         color = mix(color, skyColor, fog);
     }
 
-    // Add accumulated volumetric glow
-    color += volumeGlow * (0.8 + safeFx * 0.45);
+    color += volumeGlow * (1.0 + safeFx * 0.5);
 
-    // ACES Tonemapping & Gamma Correction
+    // Post-Processing: ACES Tonemapping
     color *= exposure;
     color = (color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14);
-    color = pow(color, vec3(1.0 / max(gamma, 0.2)));
+    color = pow(color, vec3(1.0 / max(gamma, 0.1)));
 
-    // Vignetting
+    // Vignette
     vec2 q = gl_FragCoord.xy / resolution.xy;
-    color *= 0.5 + 0.5 * pow(16.0 * q.x * q.y * (1.0 - q.x) * (1.0 - q.y), 0.25);
+    color *= 0.5 + 0.5 * pow(16.0 * q.x * q.y * (1.0 - q.x) * (1.0 - q.y), 0.2);
 
     fragColor = vec4(color, 1.0);
 }
@@ -411,16 +626,13 @@ void main() {
 }
 """
 
-
 @dataclass(frozen=True)
 class ThermalHoldState:
     lines: Sequence[str]
     log_path: Path
 
-
 def _sanitize_text(line: str) -> str:
     return "".join(ch if ch in FONT_3X5 else "?" for ch in line.upper())
-
 
 def _draw_glyph(
     canvas: np.ndarray,
@@ -441,7 +653,6 @@ def _draw_glyph(
             x1 = min(x0 + scale, width)
             if x1 > 0 and y1 > 0 and x0 < width and y0 < height:
                 canvas[max(y0, 0):y1, max(x0, 0):x1] = color
-
 
 def _draw_text_line(
     canvas: np.ndarray,
@@ -481,13 +692,11 @@ def _draw_text_line(
         _draw_glyph(canvas, FONT_3X5.get(char, FONT_3X5["?"]), cursor, y, scale, color)
         cursor += glyph_width + spacing
 
-
 def _text_width(line: str, scale: int) -> int:
     sanitized = _sanitize_text(line)
     if not sanitized:
         return 0
     return len(sanitized) * (4 * scale) - scale
-
 
 def _fill_rect(
     canvas: np.ndarray,
@@ -505,7 +714,6 @@ def _fill_rect(
     if right > left and bottom > top:
         canvas[top:bottom, left:right] = color
 
-
 def build_hold_frame(lines: Sequence[str], size: Sequence[int]) -> np.ndarray:
     width = max(int(size[0]), 320)
     height = max(int(size[1]), 180)
@@ -514,9 +722,9 @@ def build_hold_frame(lines: Sequence[str], size: Sequence[int]) -> np.ndarray:
     stripe = 0.5 + 0.5 * np.sin(x_gradient * 18.0 + y_gradient * 11.0)
 
     frame = np.zeros((height, width, 3), dtype=np.uint8)
-    frame[..., 0] = np.clip(18.0 + 40.0 * (1.0 - y_gradient) + stripe * 12.0, 0, 255).astype(np.uint8)
-    frame[..., 1] = np.clip(11.0 + 20.0 * (1.0 - y_gradient) + stripe * 8.0, 0, 255).astype(np.uint8)
-    frame[..., 2] = np.clip(10.0 + 16.0 * (1.0 - y_gradient) + stripe * 7.0, 0, 255).astype(np.uint8)
+    frame[..., 0] = np.clip(50.0 + 40.0 * (1.0 - y_gradient) + stripe * 12.0, 0, 255).astype(np.uint8)
+    frame[..., 1] = np.clip(30.0 + 20.0 * (1.0 - y_gradient) + stripe * 8.0, 0, 255).astype(np.uint8)
+    frame[..., 2] = np.clip(15.0 + 10.0 * (1.0 - y_gradient) + stripe * 7.0, 0, 255).astype(np.uint8)
 
     margin = max(24, min(width, height) // 12)
     max_chars = max((len(_sanitize_text(line)) for line in lines), default=1)
@@ -534,14 +742,13 @@ def build_hold_frame(lines: Sequence[str], size: Sequence[int]) -> np.ndarray:
         if index == 0:
             color = (255, 132, 78)
         elif index >= len(lines) - 2:
-            color = (204, 214, 220)
+            color = (240, 210, 180)
         else:
-            color = (248, 238, 228)
+            color = (255, 250, 240)
         line_y = start_y + index * (line_height + line_gap)
         _draw_text_line(frame, line, line_y, scale, color)
 
     return frame
-
 
 def build_hud_frame(
     left_lines: Sequence[str],
@@ -589,11 +796,11 @@ def build_hud_frame(
         right_x = margin
         right_y = margin + left_panel_height + gap
 
-    panel_color = (6, 10, 14, 172)
-    line_color = (36, 214, 192, 210)
-    title_color = (238, 252, 247, 245)
-    body_color = (190, 222, 224, 230)
-    warn_color = (255, 186, 87, 238)
+    panel_color = (20, 14, 8, 172)
+    line_color = (230, 150, 40, 210)
+    title_color = (255, 250, 240, 245)
+    body_color = (240, 210, 180, 230)
+    warn_color = (255, 100, 80, 238)
 
     _fill_rect(frame, left_x, left_y, left_x + left_panel_width, left_y + left_panel_height, panel_color)
     _fill_rect(frame, left_x, left_y, left_x + scale, left_y + left_panel_height, line_color)
@@ -639,11 +846,8 @@ def build_hud_frame(
 
     return frame
 
-
 class GarageHeatShow(mglw.WindowConfig):
-    """GPU-heavy 3D volumetric world simulation with CPU burners and thermal hold."""
-
-    title = "Garage Life Lab - 3D Bio-World"
+    title = "Garage Life Lab - 3D Sahara Bio-World"
     gl_version = (4, 5)
     resource_dir = Path(__file__).parent
     window_size = (1920, 1080)
@@ -937,7 +1141,7 @@ class GarageHeatShow(mglw.WindowConfig):
             cpu_temp = self.latest_temperatures.get("CPU")
         left_lines = [
             "GARAGE LIFE LAB",
-            "3D VOLUMETRIC STRESS",
+            "3D SAHARA ECOSYSTEM",
             f"{width}X{height} MAP {tiles_x}X{tiles_y}",
             f"SIM STEP {self.args.substeps} RAYMARCH {self.args.ray_steps}",
             f"FX {self.args.fx_intensity:.1f} CAM {self.args.camera_speed:.1f}",
@@ -1014,7 +1218,7 @@ class GarageHeatShow(mglw.WindowConfig):
         tiles_x = max(1, int(np.ceil(width_px / tile_size)))
         tiles_y = max(1, int(np.ceil(height_px / tile_size)))
 
-        rng = np.random.default_rng(2026)
+        rng = np.random.default_rng(4242)
         tile_y, tile_x = np.meshgrid(
             np.arange(tiles_y, dtype=np.float32),
             np.arange(tiles_x, dtype=np.float32),
@@ -1023,13 +1227,13 @@ class GarageHeatShow(mglw.WindowConfig):
         x_norm = tile_x / max(tiles_x - 1, 1)
         y_norm = tile_y / max(tiles_y - 1, 1)
 
-        height = (
-            0.45
-            + 0.15 * np.sin(x_norm * 7.3 + 0.9)
-            + 0.11 * np.cos(y_norm * 5.7 - 1.2)
-            + 0.08 * np.sin((x_norm + y_norm) * 11.0)
-            + 0.06 * np.cos((x_norm - y_norm) * 13.0)
-            + rng.standard_normal((tiles_y, tiles_x), dtype=np.float32) * 0.025
+        dunes = 0.45 + 0.20 * np.sin(x_norm * 14.3 + np.cos(y_norm * 8.2) * 2.0)
+        dunes += 0.12 * np.sin((y_norm + x_norm) * 9.5)
+
+        height = np.clip(
+            dunes
+            + rng.standard_normal((tiles_y, tiles_x), dtype=np.float32) * 0.025,
+            0.0, 1.0
         )
 
         continent_count = max(5, (tiles_x * tiles_y) // 4000)
@@ -1040,7 +1244,7 @@ class GarageHeatShow(mglw.WindowConfig):
             ry = rng.uniform(max(5.0, tiles_y * 0.04), max(12.0, tiles_y * 0.18))
             distance = ((tile_x - cx) / rx) ** 2 + ((tile_y - cy) / ry) ** 2
             lift = np.clip(1.0 - distance, 0.0, 1.0)
-            height += lift * rng.uniform(0.10, 0.24)
+            height += lift * rng.uniform(0.10, 0.30)
 
         trench_count = max(4, continent_count // 2)
         for _ in range(trench_count):
@@ -1050,79 +1254,48 @@ class GarageHeatShow(mglw.WindowConfig):
             ry = rng.uniform(max(6.0, tiles_y * 0.05), max(14.0, tiles_y * 0.16))
             distance = ((tile_x - cx) / rx) ** 2 + ((tile_y - cy) / ry) ** 2
             carve = np.clip(1.0 - distance, 0.0, 1.0)
-            height -= carve * rng.uniform(0.08, 0.18)
+            height -= carve * rng.uniform(0.10, 0.25)
 
-        ridge_bands = np.sin(x_norm * 21.0 + np.cos(y_norm * 9.0) * 2.3)
-        height += np.clip(ridge_bands - 0.45, 0.0, 1.0) * 0.08
         height = np.clip(height, 0.0, 1.0)
 
-        sea_level = 0.46
-        ocean = (height < sea_level).astype(np.float32)
-        coast = np.clip(1.0 - np.abs(height - sea_level) / 0.07, 0.0, 1.0)
-        latitude = 1.0 - np.abs(y_norm * 2.0 - 1.0)
+        sand_sea_level = 0.30
+        deep_sand = (height < sand_sea_level).astype(np.float32)
+        oasis_areas = np.clip(1.0 - np.abs(height - sand_sea_level) / 0.05, 0.0, 1.0)
 
         moisture = np.clip(
-            0.16
-            + ocean * 0.52
-            + coast * 0.22
-            + latitude * 0.12
-            + 0.08 * np.sin(x_norm * 9.0 - y_norm * 6.0)
-            + rng.standard_normal((tiles_y, tiles_x), dtype=np.float32) * 0.03,
+            0.05
+            + deep_sand * 0.30
+            + oasis_areas * 0.45
+            + rng.standard_normal((tiles_y, tiles_x), dtype=np.float32) * 0.02,
             0.0,
             1.0,
         )
 
         biomass = np.clip(
-            (1.0 - ocean)
+            (1.0 - deep_sand)
             * (
-                0.06
-                + moisture * 0.62
-                + latitude * 0.16
-                - np.clip(height - 0.72, 0.0, 1.0) * 0.50
+                0.02
+                + moisture * 0.50
+                - np.clip(height - 0.70, 0.0, 1.0) * 0.60
             ),
             0.0,
             1.0,
         )
 
-        settlement = np.zeros((tiles_y, tiles_x), dtype=np.float32)
-        candidate_mask = (
-            (ocean < 0.5)
-            & (coast > 0.35)
-            & (biomass > 0.28)
-            & (height < 0.74)
+        geothermal_faults = np.clip(
+            np.abs(np.sin(x_norm * 18.0 + np.sin(y_norm * 22.0)) * 0.5) * 2.0, 0.0, 1.0
         )
-        candidates = np.argwhere(candidate_mask)
-        if len(candidates) > 0:
-            city_count = min(max(8, (tiles_x * tiles_y) // 1800), len(candidates))
-            city_indices = rng.choice(len(candidates), size=city_count, replace=False)
-            for candidate_index in city_indices:
-                cy, cx = candidates[candidate_index]
-                radius = int(rng.integers(1, 3))
-                y0 = max(cy - radius, 0)
-                y1 = min(cy + radius + 1, tiles_y)
-                x0 = max(cx - radius, 0)
-                x1 = min(cx + radius + 1, tiles_x)
-                patch_y, patch_x = np.meshgrid(
-                    np.arange(y0, y1, dtype=np.float32),
-                    np.arange(x0, x1, dtype=np.float32),
-                    indexing="ij",
-                )
-                distance = np.sqrt((patch_x - cx) ** 2 + (patch_y - cy) ** 2)
-                influence = np.clip(1.0 - distance / max(radius + 0.5, 1.0), 0.0, 1.0)
-                settlement[y0:y1, x0:x1] = np.maximum(
-                    settlement[y0:y1, x0:x1],
-                    influence * rng.uniform(0.35, 0.78),
-                )
+        heat = np.clip(1.0 - geothermal_faults * 3.0, 0.0, 1.0)
 
-        reaction_u = np.clip(1.0 - biomass * 0.36 + moisture * 0.08, 0.0, 1.0)
-        reaction_v = np.clip(biomass * 0.82 + moisture * 0.12, 0.0, 1.0)
+        reaction_u = np.clip(1.0 - biomass * 0.20 + moisture * 0.05, 0.0, 1.0)
+        reaction_v = np.clip(biomass * 0.70 + moisture * 0.15, 0.0, 1.0)
 
         tile_field = np.stack(
             [
                 reaction_u.astype(np.float32),
                 reaction_v.astype(np.float32),
                 height.astype(np.float32),
-                settlement.astype(np.float32),
+                heat.astype(np.float32),
             ],
             axis=-1,
         )
@@ -1137,8 +1310,6 @@ class GarageHeatShow(mglw.WindowConfig):
         self.update_program["diffV"].value = self.args.diff_v
         self.update_program["dt"].value = self.args.time_step
         self.update_program["laplaceScale"].value = self.args.laplace_scale
-        self.update_program["noiseStrength"].value = self.args.noise_strength
-        self.update_program["parameterDrift"].value = self.args.param_drift
 
         self.display_program["exposure"].value = self.args.exposure
         self.display_program["glow"].value = self.args.glow
@@ -1222,9 +1393,6 @@ class GarageHeatShow(mglw.WindowConfig):
         self.ctx.viewport = (0, 0, *self.wnd.buffer_size)
         self.state_textures[self.active_state].use(location=0)
         self.display_program["time"].value = animated_time
-        self.display_program["colorShift"].value = (
-            animated_time * self.args.color_shift_speed
-        ) % 10.0
         self.quad.render(self.display_program)
         self._render_hud()
 
@@ -1242,7 +1410,7 @@ class GarageHeatShow(mglw.WindowConfig):
         self.quad.render(self.message_program)
         self.ctx.disable(moderngl.BLEND)
 
-    def resize(self, width: int, height: int):  # type: ignore[override]
+    def resize(self, width: int, height: int):
         if self.thermal_hold is not None:
             self._build_hold_texture(self.thermal_hold.lines)
             return
@@ -1270,7 +1438,7 @@ class GarageHeatShow(mglw.WindowConfig):
         super().destroy()
 
     @classmethod
-    def add_arguments(cls, parser) -> None:  # type: ignore[override]
+    def add_arguments(cls, parser) -> None:
         parser.add_argument("--width", type=int, default=cls.window_size[0], help="Render width")
         parser.add_argument("--height", type=int, default=cls.window_size[1], help="Render height")
         parser.add_argument("--feed", type=float, default=0.035, help="Gray-Scott base feed rate")
@@ -1280,10 +1448,7 @@ class GarageHeatShow(mglw.WindowConfig):
         parser.add_argument("--time-step", dest="time_step", type=float, default=1.0, help="Simulation time step")
         parser.add_argument("--substeps", type=int, default=8, help="Simulation steps per frame")
         parser.add_argument("--laplace-scale", type=float, default=1.0, help="Global laplacian multiplier")
-        parser.add_argument("--noise-strength", type=float, default=0.015, help="Stochastic noise injected each step")
-        parser.add_argument("--param-drift", type=float, default=0.004, help="Sinusoidal feed/kill drift amplitude")
         parser.add_argument("--anim-speed", type=float, default=1.0, help="Global animation multiplier")
-        parser.add_argument("--color-shift-speed", type=float, default=0.05, help="Palette cycle speed")
         parser.add_argument("--exposure", type=float, default=1.4, help="Display exposure")
         parser.add_argument("--glow", type=float, default=1.1, help="Display glow factor")
         parser.add_argument("--gamma", type=float, default=1.2, help="Display gamma correction")
@@ -1301,10 +1466,8 @@ class GarageHeatShow(mglw.WindowConfig):
         parser.add_argument("--no-hud", action="store_true", help="Hide the in-frame show status overlay")
         parser.add_argument("--hud-scale", type=float, default=1.0, help="Scale the in-frame show status overlay")
 
-
 def main() -> None:
     mglw.run_window_config(GarageHeatShow)
-
 
 if __name__ == "__main__":
     main()

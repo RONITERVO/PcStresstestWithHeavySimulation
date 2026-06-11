@@ -97,11 +97,12 @@ FONT_3X5 = {
 
 VERT_SHADER = """
 #version 450
-in vec2 in_position;
+in vec3 in_position;
+in vec2 in_texcoord_0;
 out vec2 uv;
 void main() {
-    uv = in_position * 0.5 + 0.5;
-    gl_Position = vec4(in_position, 0.0, 1.0);
+    uv = in_texcoord_0;
+    gl_Position = vec4(in_position, 1.0);
 }
 """
 
@@ -118,17 +119,11 @@ uniform float diffU;
 uniform float diffV;
 uniform float dt;
 uniform float laplaceScale;
-uniform float noiseStrength;
-uniform float parameterDrift;
-
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
 
 // Fluid advection based on terrain topography
 void main() {
     vec2 texel = 1.0 / resolution;
-
+    
     vec4 c = texture(stateTex, uv);
     vec4 r = texture(stateTex, uv + vec2(texel.x, 0.0));
     vec4 l = texture(stateTex, uv - vec2(texel.x, 0.0));
@@ -142,31 +137,29 @@ void main() {
     // Compute standard laplacian
     float lapU = (r.r + l.r + t.r + b.r) * 0.2 + (tr.r + tl.r + br.r + bl.r) * 0.05 - c.r;
     float lapV = (r.g + l.g + t.g + b.g) * 0.2 + (tr.g + tl.g + br.g + bl.g) * 0.05 - c.g;
-
-    // Terrain Gradient (channel B is height, channel A is settlement/city energy)
+    
+    // Terrain Gradient (Channel B is height, A is biome/moisture)
     vec2 gradH = vec2(r.b - l.b, t.b - b.b);
-
+    
     // Compute advection vectors (chemicals flow down height gradients)
     float flowStrength = 0.8;
     float advectU = dot(gradH, vec2(r.r - l.r, t.r - b.r)) * flowStrength;
     float advectV = dot(gradH, vec2(r.g - l.g, t.g - b.g)) * flowStrength;
 
-    float wetNoise = (hash(uv * resolution + floor(time * 0.35)) - 0.5) * noiseStrength;
-
     // Add local chaotic drift
-    float localFeed = feed + c.a * 0.015 * sin(time * 0.1 + uv.x * 20.0) + wetNoise * 0.18;
-    float localKill = kill + (1.0 - c.a) * 0.01 * cos(time * 0.15 + uv.y * 15.0) + parameterDrift * 0.6;
-
+    float localFeed = feed + c.a * 0.015 * sin(time * 0.1 + uv.x * 20.0);
+    float localKill = kill + (1.0 - c.a) * 0.01 * cos(time * 0.15 + uv.y * 15.0);
+    
     // Growth based on moisture
     float reaction = c.r * c.g * c.g;
-
+    
     // Integration
     float du = (diffU * lapU * laplaceScale) - reaction + localFeed * (1.0 - c.r) - advectU;
     float dv = (diffV * lapV * laplaceScale) + reaction - (localFeed + localKill) * c.g - advectV;
-
+    
     // Modify terrain height organically over time based on biomass (V)
-    float dh = (c.g * 0.01 - 0.002 + wetNoise * 0.015) * dt * c.a;
-
+    float dh = (c.g * 0.01 - 0.002) * dt * c.a;
+    
     fragColor = vec4(
         clamp(c.r + du * dt, 0.0, 1.0),
         clamp(c.g + dv * dt, 0.0, 1.0),
@@ -183,29 +176,6 @@ out vec4 fragColor;
 uniform sampler2D stateTex;
 uniform vec2 resolution;
 uniform float time;
-uniform float exposure;
-uniform float glow;
-uniform float gamma;
-uniform float contourContrast;
-uniform float colorShift;
-uniform float cameraSpeed;
-uniform float fxIntensity;
-uniform int raySteps;
-
-float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(41.7, 289.1))) * 45758.5453);
-}
-
-float noise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    f = f * f * (3.0 - 2.0 * f);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-}
 
 // Raymarching camera and environment setup
 mat3 setCamera(in vec3 ro, in vec3 ta, float cr) {
@@ -221,36 +191,34 @@ float map(in vec3 p, out float matID, out vec4 stateOut) {
     // Scale world to texture UVs
     vec2 mapUV = p.xz * 0.04;
     vec4 state = textureLod(stateTex, mapUV, 0.0);
-
+    
     // Terrain height (b) and biomass extrusion (g)
-    float safeFx = clamp(fxIntensity, 0.2, 1.6);
-    float baseHeight = state.b * mix(2.7, 3.9, safeFx);
-    float biomassExtrusion = smoothstep(0.16, 0.86, state.g) * mix(0.85, 2.15, safeFx);
+    float baseHeight = state.b * 4.0;
+    float biomassExtrusion = smoothstep(0.1, 0.8, state.g) * 2.5;
     float h = baseHeight + biomassExtrusion;
-
+    
     // Add high frequency fractal noise for detail
-    float detail = sin(p.x * 8.0) * cos(p.z * 8.3) * 0.035 + sin(p.x * 15.0) * cos(p.z * 14.1) * 0.014;
-    detail += (noise(p.xz * 2.4 + time * 0.02) - 0.5) * 0.045;
-    h += detail * smoothstep(0.2, 0.8, state.b) * safeFx;
-
+    float detail = sin(p.x * 8.0) * cos(p.z * 8.3) * 0.05 + sin(p.x * 15.0) * cos(p.z * 14.1) * 0.02;
+    h += detail * smoothstep(0.2, 0.8, state.b);
+    
     float dTerrain = p.y - h;
-
+    
     // Water plane
-    float dWater = p.y - 1.55;
-
+    float dWater = p.y - 1.8;
+    
     if (dTerrain < dWater) {
         matID = 1.0; // Terrain/Organics
         stateOut = state;
-        return dTerrain * 0.72; // Under-relax to prevent missed intersections on steep heightmaps
+        return dTerrain * 0.6; // Under-relax to prevent missed intersections on steep heightmaps
     } else {
         matID = 0.0; // Water
         stateOut = state;
-        return dWater * 0.9;
+        return dWater * 0.8;
     }
 }
 
 vec3 calcNormal(in vec3 p) {
-    const float eps = 0.04;
+    const float eps = 0.01;
     const vec2 h = vec2(eps, 0);
     float dummyMat; vec4 dummyState;
     return normalize(vec3(
@@ -264,10 +232,10 @@ float calcShadow(in vec3 ro, in vec3 rd) {
     float res = 1.0;
     float t = 0.1;
     float dummyMat; vec4 dummyState;
-    for (int i = 0; i < 40; i++) {
+    for (int i = 0; i < 32; i++) {
         float h = map(ro + rd * t, dummyMat, dummyState);
         res = min(res, 8.0 * h / t);
-        t += clamp(h, 0.05, 0.75);
+        t += clamp(h, 0.05, 0.5);
         if (h < 0.001 || t > 10.0) break;
     }
     return clamp(res, 0.0, 1.0);
@@ -275,69 +243,59 @@ float calcShadow(in vec3 ro, in vec3 rd) {
 
 void main() {
     vec2 p = (-resolution.xy + 2.0 * gl_FragCoord.xy) / resolution.y;
-
-    float safeFx = clamp(fxIntensity, 0.2, 1.6);
-    int safeRaySteps = clamp(raySteps, 32, 160);
-
+    
     // Smooth cinematic camera movement
-    float camTime = time * 0.15 * max(cameraSpeed, 0.05);
-    vec3 ro = vec3(camTime * 5.0, 7.0 + sin(camTime * 0.5) * 1.2, camTime * 4.0);
-    vec3 ta = vec3(ro.x + 4.8, 2.1, ro.z + 4.8 + sin(camTime));
-
+    float camTime = time * 0.15;
+    vec3 ro = vec3(camTime * 5.0, 6.0 + sin(camTime * 0.5) * 1.5, camTime * 4.0);
+    vec3 ta = vec3(ro.x + 4.0, 2.0, ro.z + 4.0 + sin(camTime));
+    
     mat3 ca = setCamera(ro, ta, sin(camTime * 0.3) * 0.1);
     vec3 rd = ca * normalize(vec3(p.xy, 2.0));
-
+    
     // Environment
-    vec3 lightDir = normalize(vec3(0.8, 0.62, -0.4));
-    float sun = pow(max(0.0, dot(rd, lightDir)), 220.0);
-    float skyRise = smoothstep(-0.2, 0.9, rd.y);
-    vec3 skyColor = mix(vec3(0.008, 0.014, 0.032), vec3(0.09, 0.18, 0.31), skyRise);
-    skyColor += vec3(1.00, 0.72, 0.36) * sun * (0.8 + safeFx * 0.8);
-    float aurora = smoothstep(0.74, 0.98, rd.y + 0.12 * sin(p.x * 3.0 + time * 0.22));
-    aurora *= 0.5 + 0.5 * sin(p.x * 9.0 + time * 0.65 + colorShift);
-    skyColor += aurora * vec3(0.08, 0.55, 0.46) * safeFx;
-
+    vec3 lightDir = normalize(vec3(0.8, 0.6, -0.4));
+    vec3 skyColor = mix(vec3(0.01, 0.02, 0.05), vec3(0.1, 0.2, 0.3), pow(max(0.0, dot(rd, lightDir)), 2.0));
+    
     // Raymarching
     float tMax = 50.0;
     float t = 0.0;
     float matID = -1.0;
     vec4 state = vec4(0.0);
-    vec3 volumeGlow = vec3(0.0);
-
-    for (int i = 0; i < 160; i++) {
-        if (i >= safeRaySteps) break;
+    vec3 glow = vec3(0.0);
+    
+    for (int i = 0; i < 128; i++) {
         vec3 pos = ro + rd * t;
         float currMat; vec4 currState;
         float h = map(pos, currMat, currState);
-
+        
         // Volumetric bioluminescence accumulation (V concentration)
         if (currMat == 1.0) {
             float bio = smoothstep(0.2, 0.8, currState.g);
             vec3 emColor = mix(vec3(0.0, 1.0, 0.8), vec3(1.0, 0.2, 0.5), currState.r);
-            volumeGlow += emColor * bio * (0.012 + glow * 0.003) * safeFx / (1.0 + abs(h) * 10.0);
+            glow += emColor * bio * (0.015 / (1.0 + abs(h) * 10.0));
         }
-
-        if (h < max(0.003, 0.0015 * t) || t > tMax) {
+        
+        if (abs(h) < 0.002 * t || t > tMax) {
             matID = currMat;
             state = currState;
             break;
         }
-        t += clamp(h, 0.035, 0.85);
+        t += h;
     }
-
+    
     vec3 color = skyColor;
-
+    
     if (t < tMax) {
         vec3 pos = ro + rd * t;
         vec3 nor = calcNormal(pos);
-
+        
         // Lighting
         float occ = clamp(0.5 + 0.5 * nor.y, 0.0, 1.0);
         float sha = calcShadow(pos + nor * 0.01, lightDir);
         float dif = clamp(dot(nor, lightDir), 0.0, 1.0) * sha;
         float sky = clamp(0.5 + 0.5 * nor.y, 0.0, 1.0);
         float fre = pow(clamp(1.0 + dot(nor, rd), 0.0, 1.0), 2.0);
-
+        
         // Materials
         vec3 matColor;
         if (matID == 1.0) {
@@ -345,58 +303,51 @@ void main() {
             vec3 rock = vec3(0.1, 0.12, 0.15);
             vec3 sand = vec3(0.3, 0.25, 0.18);
             vec3 bio = mix(vec3(0.05, 0.2, 0.15), vec3(0.8, 1.0, 0.9), state.g);
-
+            
             matColor = mix(rock, sand, smoothstep(0.4, 0.6, nor.y));
             matColor = mix(matColor, bio, smoothstep(0.1, 0.5, state.g));
-
+            
             // Bioluminescence emission on surface
-            vec3 bioGlow = mix(vec3(0.0, 0.9, 0.7), vec3(1.0, 0.13, 0.42), state.r);
-            float pulse = 1.0 + 0.5 * sin(time * 3.0 - pos.x + colorShift * 3.0);
-            matColor += bioGlow * pow(state.g, 3.0) * (1.6 + glow * 0.65) * pulse * safeFx;
-            matColor += vec3(1.0, 0.72, 0.22) * pow(state.a, 2.0) * (1.0 + glow * 0.45) * safeFx;
-            float contour = 1.0 - smoothstep(0.018, 0.045 + contourContrast * 0.03, abs(fract(state.b * 18.0) - 0.5));
-            matColor += contour * vec3(0.08, 0.12, 0.11) * contourContrast;
+            matColor += mix(vec3(0.0, 0.8, 0.6), vec3(0.9, 0.1, 0.3), state.r) * pow(state.g, 3.0) * 2.0 * (1.0 + 0.5 * sin(time * 3.0 - pos.x));
         } else {
             // Water
-            float depth = clamp((1.55 - state.b * 3.7) * 0.5, 0.0, 1.0);
+            float depth = clamp((1.8 - state.b * 4.0) * 0.5, 0.0, 1.0);
             vec3 shallow = vec3(0.0, 0.4, 0.5);
             vec3 deep = vec3(0.0, 0.05, 0.15);
             matColor = mix(shallow, deep, depth);
-            matColor += vec3(0.05, 0.24, 0.22) * (0.5 + 0.5 * sin(pos.x * 3.0 + pos.z * 2.0 + time * 1.3)) * safeFx;
-
+            
             // Specular
             vec3 ref = reflect(rd, nor);
             float spe = pow(clamp(dot(ref, lightDir), 0.0, 1.0), 32.0) * sha;
             matColor += vec3(1.0) * spe * 0.5;
-
+            
             // Reflected bioluminescence
-            matColor += volumeGlow * 0.18;
+            matColor += glow * 0.2;
         }
-
+        
         vec3 lin = vec3(0.0);
-        lin += 2.15 * dif * vec3(1.0, 0.88, 0.76);
-        lin += 0.55 * sky * vec3(0.20, 0.32, 0.45) * occ;
+        lin += 2.0 * dif * vec3(1.0, 0.9, 0.8);
+        lin += 0.5 * sky * vec3(0.2, 0.3, 0.4) * occ;
         lin += 0.2 * fre * vec3(1.0);
-
+        
         color = matColor * lin;
-
+        
         // Add atmospheric fog
-        float fog = 1.0 - exp(-0.0016 * t * t);
+        float fog = 1.0 - exp(-0.001 * t * t);
         color = mix(color, skyColor, fog);
     }
-
+    
     // Add accumulated volumetric glow
-    color += volumeGlow * (0.8 + safeFx * 0.45);
-
+    color += glow;
+    
     // ACES Tonemapping & Gamma Correction
-    color *= exposure;
     color = (color * (2.51 * color + 0.03)) / (color * (2.43 * color + 0.59) + 0.14);
-    color = pow(color, vec3(1.0 / max(gamma, 0.2)));
-
+    color = pow(color, vec3(1.0 / 2.2));
+    
     // Vignetting
     vec2 q = gl_FragCoord.xy / resolution.xy;
     color *= 0.5 + 0.5 * pow(16.0 * q.x * q.y * (1.0 - q.x) * (1.0 - q.y), 0.25);
-
+    
     fragColor = vec4(color, 1.0);
 }
 """
@@ -679,7 +630,7 @@ class GarageHeatShow(mglw.WindowConfig):
 
         self.ctx.disable(moderngl.DEPTH_TEST)
         self.quad = geometry.quad_fs()
-
+        
         self.update_program = self.ctx.program(
             vertex_shader=VERT_SHADER,
             fragment_shader=SIM_FRAG_SHADER,
@@ -939,8 +890,7 @@ class GarageHeatShow(mglw.WindowConfig):
             "GARAGE LIFE LAB",
             "3D VOLUMETRIC STRESS",
             f"{width}X{height} MAP {tiles_x}X{tiles_y}",
-            f"SIM STEP {self.args.substeps} RAYMARCH {self.args.ray_steps}",
-            f"FX {self.args.fx_intensity:.1f} CAM {self.args.camera_speed:.1f}",
+            f"SIM STEP {self.args.substeps} RAYMARCH 128",
             f"CPU WORKERS {self.args.cpu_workers}",
         ]
         right_lines = [
@@ -1114,14 +1064,11 @@ class GarageHeatShow(mglw.WindowConfig):
                     influence * rng.uniform(0.35, 0.78),
                 )
 
-        reaction_u = np.clip(1.0 - biomass * 0.36 + moisture * 0.08, 0.0, 1.0)
-        reaction_v = np.clip(biomass * 0.82 + moisture * 0.12, 0.0, 1.0)
-
         tile_field = np.stack(
             [
-                reaction_u.astype(np.float32),
-                reaction_v.astype(np.float32),
                 height.astype(np.float32),
+                moisture.astype(np.float32),
+                biomass.astype(np.float32),
                 settlement.astype(np.float32),
             ],
             axis=-1,
@@ -1137,16 +1084,6 @@ class GarageHeatShow(mglw.WindowConfig):
         self.update_program["diffV"].value = self.args.diff_v
         self.update_program["dt"].value = self.args.time_step
         self.update_program["laplaceScale"].value = self.args.laplace_scale
-        self.update_program["noiseStrength"].value = self.args.noise_strength
-        self.update_program["parameterDrift"].value = self.args.param_drift
-
-        self.display_program["exposure"].value = self.args.exposure
-        self.display_program["glow"].value = self.args.glow
-        self.display_program["gamma"].value = self.args.gamma
-        self.display_program["contourContrast"].value = self.args.contour_contrast
-        self.display_program["cameraSpeed"].value = self.args.camera_speed
-        self.display_program["fxIntensity"].value = self.args.fx_intensity
-        self.display_program["raySteps"].value = int(max(32, min(160, self.args.ray_steps)))
 
     def _spin_cpu_workers(self) -> None:
         for worker_id in range(self.args.cpu_workers):
@@ -1222,9 +1159,6 @@ class GarageHeatShow(mglw.WindowConfig):
         self.ctx.viewport = (0, 0, *self.wnd.buffer_size)
         self.state_textures[self.active_state].use(location=0)
         self.display_program["time"].value = animated_time
-        self.display_program["colorShift"].value = (
-            animated_time * self.args.color_shift_speed
-        ) % 10.0
         self.quad.render(self.display_program)
         self._render_hud()
 
@@ -1288,9 +1222,6 @@ class GarageHeatShow(mglw.WindowConfig):
         parser.add_argument("--glow", type=float, default=1.1, help="Display glow factor")
         parser.add_argument("--gamma", type=float, default=1.2, help="Display gamma correction")
         parser.add_argument("--contour-contrast", type=float, default=0.75, help="Contour emphasis strength")
-        parser.add_argument("--ray-steps", type=int, default=96, help="Maximum raymarch steps per pixel")
-        parser.add_argument("--fx-intensity", type=float, default=1.0, help="Cinematic glow, aurora, terrain, and material intensity")
-        parser.add_argument("--camera-speed", type=float, default=1.0, help="Cinematic camera speed multiplier")
         parser.add_argument("--cpu-workers", type=int, default=0, help="CPU burner thread count")
         parser.add_argument("--cpu-matrix", type=int, default=896, help="CPU burner matrix size")
         parser.add_argument("--tile-size", type=int, default=12, help="Base resolution downscale factor for fluid sim")
