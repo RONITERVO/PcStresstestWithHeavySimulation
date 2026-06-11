@@ -14,7 +14,10 @@ if (-not (Test-Path $python)) {
 $separator = if ($IsWindows -or $env:OS -eq "Windows_NT") { ";" } else { ":" }
 $addData = @(
     "main.py${separator}.",
+    "engine.py${separator}.",
     "garage_life_presets.py${separator}.",
+    "worlds${separator}worlds",
+    "assets${separator}assets",
     "shaders${separator}shaders"
 )
 
@@ -26,6 +29,9 @@ $addData = @(
     --add-data $($addData[0]) `
     --add-data $($addData[1]) `
     --add-data $($addData[2]) `
+    --add-data $($addData[3]) `
+    --add-data $($addData[4]) `
+    --add-data $($addData[5]) `
     launcher.py
 
 Write-Host ""

@@ -1,9 +1,10 @@
 # Garage Life Lab
 
-Garage Life Lab is a long-run 3D bio-world for a large garage display. It keeps the machine hot with a full-screen GPU simulation plus optional CPU burners, but the screen now reads as a cinematic alien landscape instead of abstract noise: glowing biomass, terrain extrusion, reflective water, city energy, aurora sky, atmospheric fog, thermal status, and an in-frame show overlay.
+Garage Life Lab is a long-run selectable-world show for a large garage display. It keeps the machine hot with a full-screen GPU simulation plus optional CPU burners, while the launcher separates the world you want to see from how hard the PC should work.
 
 ## Highlights
-- 3D raymarched bio-world designed to stay readable from across a garage.
+- Selectable worlds: Sahara Sandstorm, Tsunami Land, Muddy Asteroid Planet, Neural Plane, Original 3D, Original Tuned 3D, and Original 2D.
+- 3D raymarched worlds and a legacy 2D tile world designed to stay readable from across a garage.
 - In-frame show HUD with resolution, tile grid, worker load, FPS, uptime, temperature limits, and thermal hold state.
 - Full-screen GPU workload retained for sustained heat.
 - Optional NumPy CPU burners for extra room heat.
@@ -23,7 +24,25 @@ Normal users should launch the Windows app UI, not PowerShell flags:
 .\Start-GarageLifeLab.cmd
 ```
 
-The first screen detects the PC, recommends a preset, shows a live preview of the world, and displays the exact launch command before anything starts.
+The first screen detects the PC, lets you choose a world, recommends a PC load preset, shows a preview thumbnail, and displays the exact launch command before anything starts.
+
+## Worlds
+
+World selection is separate from PC load:
+
+- **Sahara Sandstorm**: desert dune world with sandstorm visuals.
+- **Tsunami Land**: flooded terrain experiment.
+- **Muddy Asteroid Planet**: muddy planetary surface experiment.
+- **Neural Plane**: neural/matrix containment experiment.
+- **Original 3D**: legacy 3D raymarched bio-world.
+- **Original Tuned 3D**: current tuned default.
+- **Original 2D**: legacy tile-world shader.
+
+List world IDs from the command line:
+
+```powershell
+.\.venv\Scripts\python main.py --list-worlds
+```
 
 ## Presets
 
@@ -70,12 +89,20 @@ dist\GarageLifeLab\GarageLifeLab.exe
 Advanced users can still run the simulation directly:
 
 ```powershell
-.\.venv\Scripts\python main.py --width 1920 --height 1080 --tile-size 10 --substeps 32 --ray-steps 104 --fx-intensity 1.1 --cpu-workers 16 --cpu-matrix 1024 --glow 1.32 --exposure 1.45
+.\.venv\Scripts\python main.py --world static-sandstorm-3d --width 1920 --height 1080 --tile-size 10 --substeps 32 --ray-steps 104 --fx-intensity 1.1 --cpu-workers 16 --cpu-matrix 1024 --glow 1.32 --exposure 1.45
 ```
 
 ## Lower Detail Test
 ```powershell
 .\.venv\Scripts\python main.py --width 1920 --height 1080 --tile-size 14 --substeps 16 --cpu-workers 8 --cpu-matrix 768
+```
+
+## Smoke Worlds
+
+Run every registered world at low settings and fail on startup, shader, or compiler errors:
+
+```powershell
+.\scripts\smoke_worlds.ps1
 ```
 
 ## Thermal Hold
@@ -86,6 +113,7 @@ Advanced users can still run the simulation directly:
 
 ## Useful Flags
 - `--tile-size 12`
+- `--world static-sandstorm-3d`
 - `--substeps 24`
 - `--ray-steps 104`
 - `--fx-intensity 1.0`
@@ -103,3 +131,4 @@ Advanced users can still run the simulation directly:
 - Smaller `--tile-size` means more visible detail per screen, larger values mean chunkier cells that read better from farther away.
 - Keep V-Sync off if the goal is sustained load.
 - Restarting reseeds the world and gives you a new long-run map.
+- Historical full-file snapshots live in `docs\world-snapshots`; the runnable app uses the shared engine plus `worlds\*.py`.
