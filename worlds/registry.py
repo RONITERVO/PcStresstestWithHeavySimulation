@@ -11,6 +11,7 @@ from . import (
     original_2d,
     original_3d,
     original_tuned_3d,
+    sketchbook_ink_islands_3d,
     sketchbook_visualizer_3d,
     static_sandstorm_3d,
     tsunami_land_3d,
@@ -22,6 +23,7 @@ DEFAULT_WORLD_ID = "original-tuned-3d"
 _WORLD_ORDER: tuple[WorldSpec, ...] = (
     living_sketchbook_3d.SPEC,
     sketchbook_visualizer_3d.SPEC,
+    sketchbook_ink_islands_3d.SPEC,
     audio_reactive_3d.SPEC,
     static_sandstorm_3d.SPEC,
     tsunami_land_3d.SPEC,
