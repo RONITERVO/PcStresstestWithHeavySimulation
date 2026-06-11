@@ -10,6 +10,7 @@ from . import (
     future_minecraft,
     living_sketchbook_3d,
     minecraft_3d,
+    minecraft_first_future,
     minecraft_fluid,
     minecraft_long_term_3d,
     minecraft_voxels_3d,
@@ -30,6 +31,7 @@ from .spec import WorldSpec
 DEFAULT_WORLD_ID = "minecraft-long-term-3d"
 
 _WORLD_ORDER: tuple[WorldSpec, ...] = (
+    minecraft_first_future.SPEC,
     future_future_minecraft.SPEC,
     future_minecraft.SPEC,
     true_minecraft.SPEC,
