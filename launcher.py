@@ -20,6 +20,8 @@ from garage_life_presets import (
     preset_by_key,
     recommended_preset_key,
 )
+from worlds.registry import DEFAULT_WORLD_ID, get_world, iter_worlds
+from worlds.spec import WorldSpec
 
 
 APP_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
@@ -43,7 +45,12 @@ class GarageLifeLauncher:
             python_executable=sys.executable,
         )
         self.presets = build_presets(self.hw)
+        self.worlds = list(iter_worlds())
+        self.world_names_by_id = {world.id: world.display_name for world in self.worlds}
+        self.world_ids_by_name = {world.display_name: world.id for world in self.worlds}
         self.python_command = select_python_command()
+        self.selected_world_id = tk.StringVar(value=DEFAULT_WORLD_ID)
+        self.selected_world_name = tk.StringVar(value=self.world_names_by_id[DEFAULT_WORLD_ID])
         self.selected_key = tk.StringVar(value=recommended_preset_key(self.hw))
         self.status_var = tk.StringVar(value="Ready")
         self.advanced_open = tk.BooleanVar(value=False)
@@ -54,7 +61,9 @@ class GarageLifeLauncher:
         self.fields: dict[str, tk.StringVar] = {}
         self.command_var = tk.StringVar()
         self.summary_var = tk.StringVar()
+        self.world_summary_var = tk.StringVar()
         self.hardware_var = tk.StringVar(value=self._hardware_summary())
+        self.preview_image: Optional[tk.PhotoImage] = None
 
         self._configure_style()
         self._build_layout()
@@ -120,17 +129,43 @@ class GarageLifeLauncher:
         left = ttk.Frame(shell, style="Panel.TFrame", padding=18)
         left.grid(row=1, column=0, sticky="nsew", padx=(0, 14))
         left.columnconfigure(0, weight=1)
-        left.rowconfigure(1, weight=1)
+        left.rowconfigure(3, weight=1)
 
         ttk.Label(
             left,
-            text="Choose how hard this PC should work",
+            text="Choose World",
             style="Panel.TLabel",
             font=("Segoe UI", 13, "bold"),
         ).grid(row=0, column=0, sticky="w", pady=(0, 10))
 
+        world_panel = ttk.Frame(left, style="Panel.TFrame")
+        world_panel.grid(row=1, column=0, sticky="ew", pady=(0, 16))
+        world_panel.columnconfigure(0, weight=1)
+        self.world_combo = ttk.Combobox(
+            world_panel,
+            textvariable=self.selected_world_name,
+            values=[world.display_name for world in self.worlds],
+            state="readonly",
+            font=("Segoe UI", 11),
+        )
+        self.world_combo.grid(row=0, column=0, sticky="ew")
+        self.world_combo.bind("<<ComboboxSelected>>", self._world_changed)
+        ttk.Label(
+            world_panel,
+            textvariable=self.world_summary_var,
+            style="MutedPanel.TLabel",
+            wraplength=600,
+        ).grid(row=1, column=0, sticky="w", pady=(6, 0))
+
+        ttk.Label(
+            left,
+            text="Choose PC Load",
+            style="Panel.TLabel",
+            font=("Segoe UI", 13, "bold"),
+        ).grid(row=2, column=0, sticky="w", pady=(0, 10))
+
         cards = ttk.Frame(left, style="Panel.TFrame")
-        cards.grid(row=1, column=0, sticky="nsew")
+        cards.grid(row=3, column=0, sticky="nsew")
         cards.columnconfigure(0, weight=1)
 
         for index, preset in enumerate(self.presets):
@@ -167,7 +202,7 @@ class GarageLifeLauncher:
             ).grid(row=2, column=1, sticky="w")
 
         advanced_header = ttk.Frame(left, style="Panel.TFrame")
-        advanced_header.grid(row=2, column=0, sticky="ew", pady=(12, 4))
+        advanced_header.grid(row=4, column=0, sticky="ew", pady=(12, 4))
         advanced_header.columnconfigure(1, weight=1)
         ttk.Checkbutton(
             advanced_header,
@@ -182,7 +217,7 @@ class GarageLifeLauncher:
         ).grid(row=0, column=1, sticky="e")
 
         self.advanced_frame = ttk.Frame(left, style="Panel.TFrame")
-        self.advanced_frame.grid(row=3, column=0, sticky="ew")
+        self.advanced_frame.grid(row=5, column=0, sticky="ew")
         self._build_advanced_controls()
 
         right = ttk.Frame(shell, style="Panel.TFrame", padding=18)
@@ -309,6 +344,15 @@ class GarageLifeLauncher:
     def _selected_base_preset(self) -> LaunchPreset:
         return preset_by_key(self.presets, self.selected_key.get())
 
+    def _selected_world(self) -> WorldSpec:
+        return get_world(self.selected_world_id.get())
+
+    def _world_changed(self, *_: object) -> None:
+        world_name = self.selected_world_name.get()
+        self.selected_world_id.set(self.world_ids_by_name.get(world_name, DEFAULT_WORLD_ID))
+        self._refresh_command()
+        self._draw_preview()
+
     def _load_selected_preset(self) -> None:
         preset = self._selected_base_preset()
         for key, value in preset.__dict__.items():
@@ -351,16 +395,19 @@ class GarageLifeLauncher:
 
     def _refresh_command(self) -> None:
         preset = self._current_preset()
+        world = self._selected_world()
         heat_score = preset.substeps * max(1, 20 - min(18, preset.tile_size)) + preset.ray_steps * 2 + preset.cpu_workers * 12
+        notes = ", ".join(world.stability_notes) if world.stability_notes else "standard"
+        self.world_summary_var.set(f"{world.display_name}: {notes}.")
         self.summary_var.set(
-            f"{preset.short_name}: {preset.width}x{preset.height}, tile {preset.tile_size}, "
+            f"{world.display_name} / {preset.short_name}: {preset.width}x{preset.height}, tile {preset.tile_size}, "
             f"{preset.substeps} sim steps, {preset.ray_steps} ray steps, FX {preset.fx_intensity:.1f}, "
             f"{preset.cpu_workers} CPU workers. "
             f"Thermal hold: GPU {preset.max_gpu_temp:.0f}C, CPU {preset.max_cpu_temp:.0f}C. "
             f"Estimated load: {_load_label(heat_score)}."
         )
         try:
-            command_preview = display_command(launch_command(preset, self.python_command))
+            command_preview = display_command(launch_command(preset, world, self.python_command))
         except RuntimeError as exc:
             command_preview = str(exc)
         self.command_var.set(command_preview)
@@ -377,18 +424,30 @@ class GarageLifeLauncher:
             self.root.after(50, self._draw_preview)
             return
         preset = self._current_preset()
+        world = self._selected_world()
         self.preview_tick += 1
-        cell = max(8, min(26, preset.tile_size + 3))
-        palette = ["#06101f", "#0b3143", "#106569", "#1db38b", "#80e0b5", "#ff7ba5", "#ffe083"]
-        for y in range(0, height, cell):
-            for x in range(0, width, cell):
-                wave = (x // cell * 3 + y // cell * 5 + self.preview_tick) % len(palette)
-                color = palette[wave]
-                if (x + y + self.preview_tick * cell) % (cell * 7) == 0:
-                    color = "#e7fff5"
-                if preset.fx_intensity > 1.0 and (x * 3 + y + self.preview_tick * 11) % (cell * 11) == 0:
-                    color = "#ff70b6"
-                self.preview.create_rectangle(x, y, x + cell + 1, y + cell + 1, fill=color, outline="")
+        image_drawn = False
+        if world.preview_image:
+            image_path = APP_DIR / world.preview_image
+            if image_path.exists():
+                try:
+                    self.preview_image = tk.PhotoImage(file=str(image_path))
+                    self.preview.create_image(width // 2, height // 2, image=self.preview_image)
+                    image_drawn = True
+                except tk.TclError:
+                    self.preview_image = None
+        if not image_drawn:
+            cell = max(8, min(26, preset.tile_size + 3))
+            palette = list(world.preview_palette) or ["#06101f", "#0b3143", "#106569", "#1db38b", "#80e0b5", "#ff7ba5", "#ffe083"]
+            for y in range(0, height, cell):
+                for x in range(0, width, cell):
+                    wave = (x // cell * 3 + y // cell * 5 + self.preview_tick) % len(palette)
+                    color = palette[wave]
+                    if (x + y + self.preview_tick * cell) % (cell * 7) == 0:
+                        color = "#e7fff5"
+                    if preset.fx_intensity > 1.0 and (x * 3 + y + self.preview_tick * 11) % (cell * 11) == 0:
+                        color = "#ff70b6"
+                    self.preview.create_rectangle(x, y, x + cell + 1, y + cell + 1, fill=color, outline="")
         self.preview.create_rectangle(0, 0, width, height, fill="#020409", stipple="gray25", outline="")
         self.preview.create_text(
             20,
@@ -396,7 +455,7 @@ class GarageLifeLauncher:
             anchor="nw",
             fill="#d7f6ff",
             font=("Segoe UI", 15, "bold"),
-            text=preset.name,
+            text=world.display_name,
         )
         self.preview.create_text(
             20,
@@ -404,7 +463,7 @@ class GarageLifeLauncher:
             anchor="nw",
             fill="#9fb2c7",
             font=("Segoe UI", 10),
-            text=f"{preset.width}x{preset.height}  sim {preset.substeps}  rays {preset.ray_steps}  fx {preset.fx_intensity:.1f}",
+            text=f"{preset.name}  {preset.width}x{preset.height}  sim {preset.substeps}  rays {preset.ray_steps}",
         )
         self.preview.create_text(
             20,
@@ -422,17 +481,20 @@ class GarageLifeLauncher:
             return
 
         preset = self._current_preset()
+        world = self._selected_world()
         LOG_DIR.mkdir(exist_ok=True)
         self.log_path = LOG_DIR / "launcher-last-run.log"
         log_file = self.log_path.open("w", encoding="utf-8")
         try:
-            command = launch_command(preset, self.python_command)
+            command = launch_command(preset, world, self.python_command)
         except RuntimeError as exc:
             log_file.write(str(exc) + "\n")
             log_file.close()
             self.status_var.set(str(exc))
             return
         log_file.write(f"Started {time.ctime()}\n")
+        log_file.write(f"World: {world.display_name} ({world.id})\n")
+        log_file.write(f"Load preset: {preset.name} ({preset.key})\n")
         log_file.write("Command: " + display_command(command) + "\n\n")
         log_file.flush()
         try:
@@ -449,7 +511,7 @@ class GarageLifeLauncher:
             self.status_var.set(f"Could not start: {exc}")
             return
 
-        self.status_var.set(f"Running {preset.name}. Log: {self.log_path}")
+        self.status_var.set(f"Running {world.display_name} / {preset.name}. Log: {self.log_path}")
 
     def stop_show(self) -> None:
         if self.process is None or self.process.poll() is not None:
@@ -586,9 +648,14 @@ def _command_exists(command: list[str]) -> bool:
     return result.returncode == 0
 
 
-def launch_command(preset: LaunchPreset, python_command: Optional[list[str]] = None) -> list[str]:
+def launch_command(
+    preset: LaunchPreset,
+    world: WorldSpec,
+    python_command: Optional[list[str]] = None,
+) -> list[str]:
+    world_args = ["--world", world.id]
     if getattr(sys, "frozen", False):
-        return [sys.executable, "--run-sim"] + preset.args()
+        return [sys.executable, "--run-sim"] + world_args + preset.args()
 
     command = python_command or select_python_command()
     if not command:
@@ -596,7 +663,7 @@ def launch_command(preset: LaunchPreset, python_command: Optional[list[str]] = N
             "Garage Life Lab needs Python 3.9 with the graphics packages installed. "
             "Run build_windows_app.ps1 or install requirements into .venv."
         )
-    return command + [str(APP_DIR / "main.py")] + preset.args()
+    return command + [str(APP_DIR / "main.py")] + world_args + preset.args()
 
 
 def run_simulation(argv: list[str]) -> None:
