@@ -20,6 +20,7 @@ from . import (
     sketchbook_ink_islands_3d,
     sketchbook_visualizer_3d,
     static_sandstorm_3d,
+    true_minecraft,
     tsunami_land_3d,
 )
 from .spec import WorldSpec
@@ -27,6 +28,7 @@ from .spec import WorldSpec
 DEFAULT_WORLD_ID = "minecraft-long-term-3d"
 
 _WORLD_ORDER: tuple[WorldSpec, ...] = (
+    true_minecraft.SPEC,
     minecraft_voxelv2_3d.SPEC,
     minecraft_fluid.SPEC,
     minecraft_voxels_3d.SPEC,
