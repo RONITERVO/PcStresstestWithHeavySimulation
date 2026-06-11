@@ -75,6 +75,9 @@ out vec4 fragColor;
 uniform sampler2D stateTex;
 uniform vec2 resolution;
 uniform float time;
+uniform vec3 cameraOffset;
+uniform vec2 cameraYawPitch;
+uniform float cameraZoom;
 
 // Raymarching camera and environment setup
 mat3 setCamera(in vec3 ro, in vec3 ta, float cr) {
@@ -83,6 +86,20 @@ mat3 setCamera(in vec3 ro, in vec3 ta, float cr) {
     vec3 cu = normalize(cross(cw, cp));
     vec3 cv = normalize(cross(cu, cw));
     return mat3(cu, cv, cw);
+}
+
+mat2 cameraRotate2(float angle) {
+    float s = sin(angle);
+    float c = cos(angle);
+    return mat2(c, -s, s, c);
+}
+
+vec3 cameraInputRay(vec2 p, float lens) {
+    float zoomedLens = lens * clamp(exp(cameraZoom), 0.35, 3.0);
+    vec3 ray = normalize(vec3(p.xy, zoomedLens));
+    ray.yz = cameraRotate2(cameraYawPitch.y) * ray.yz;
+    ray.xz = cameraRotate2(cameraYawPitch.x) * ray.xz;
+    return normalize(ray);
 }
 
 // Terrain SDF derived from the 2D simulation texture
@@ -147,9 +164,11 @@ void main() {
     float camTime = time * 0.15;
     vec3 ro = vec3(camTime * 5.0, 6.0 + sin(camTime * 0.5) * 1.5, camTime * 4.0);
     vec3 ta = vec3(ro.x + 4.0, 2.0, ro.z + 4.0 + sin(camTime));
+    ro += cameraOffset;
+    ta += cameraOffset;
     
     mat3 ca = setCamera(ro, ta, sin(camTime * 0.3) * 0.1);
-    vec3 rd = ca * normalize(vec3(p.xy, 2.0));
+    vec3 rd = ca * cameraInputRay(p, 2.0);
     
     // Environment
     vec3 lightDir = normalize(vec3(0.8, 0.6, -0.4));

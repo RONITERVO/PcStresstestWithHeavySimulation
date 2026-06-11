@@ -137,6 +137,9 @@ uniform float gamma;
 uniform float contourContrast;
 uniform float cameraSpeed;
 uniform float fxIntensity;
+uniform vec3 cameraOffset;
+uniform vec2 cameraYawPitch;
+uniform float cameraZoom;
 uniform int raySteps;
 
 #define MAX_STEPS 160
@@ -149,6 +152,20 @@ mat3 setCamera(in vec3 ro, in vec3 ta, float cr) {
     vec3 cu = normalize(cross(cw, cp));
     vec3 cv = normalize(cross(cu, cw));
     return mat3(cu, cv, cw);
+}
+
+mat2 cameraRotate2(float angle) {
+    float s = sin(angle);
+    float c = cos(angle);
+    return mat2(c, -s, s, c);
+}
+
+vec3 cameraInputRay(vec2 p, float lens) {
+    float zoomedLens = lens * clamp(exp(cameraZoom), 0.35, 3.0);
+    vec3 ray = normalize(vec3(p.xy, zoomedLens));
+    ray.yz = cameraRotate2(cameraYawPitch.y) * ray.yz;
+    ray.xz = cameraRotate2(cameraYawPitch.x) * ray.xz;
+    return normalize(ray);
 }
 
 float hash12(vec2 p) {
@@ -255,9 +272,11 @@ void main() {
     float camTime = time * 0.12 * max(cameraSpeed, 0.01);
     vec3 ro = vec3(camTime * 6.0, 6.6 + sin(camTime * 0.4) * 0.8, camTime * 5.0);
     vec3 ta = vec3(ro.x + 5.0, 1.45, ro.z + 5.0 + sin(camTime * 0.8) * 2.0);
+    ro += cameraOffset;
+    ta += cameraOffset;
 
     mat3 ca = setCamera(ro, ta, sin(camTime * 0.25) * 0.15);
-    vec3 rd = ca * normalize(vec3(p.xy, 2.0));
+    vec3 rd = ca * cameraInputRay(p, 2.0);
 
     vec3 lightDir = normalize(vec3(0.7, 0.5, -0.5));
 
