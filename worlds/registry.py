@@ -6,6 +6,7 @@ from typing import Iterable, Optional
 from . import (
     audio_reactive_3d,
     Final_minecraft_3D,
+    future_future_minecraft,
     future_minecraft,
     living_sketchbook_3d,
     minecraft_3d,
@@ -29,6 +30,7 @@ from .spec import WorldSpec
 DEFAULT_WORLD_ID = "minecraft-long-term-3d"
 
 _WORLD_ORDER: tuple[WorldSpec, ...] = (
+    future_future_minecraft.SPEC,
     future_minecraft.SPEC,
     true_minecraft.SPEC,
     minecraft_voxelv2_3d.SPEC,
