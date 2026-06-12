@@ -30,6 +30,12 @@ LOG_DIR = SOURCE_DIR / "logs"
 REQUIRED_IMPORT_CHECK = "import moderngl, moderngl_window, glfw, numpy, pyrr"
 
 
+def launcher_world_label(world: WorldSpec) -> str:
+    if any("candidate" in note.lower() for note in world.stability_notes):
+        return f"{world.display_name} (candidate)"
+    return world.display_name
+
+
 class GarageLifeLauncher:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -46,8 +52,8 @@ class GarageLifeLauncher:
         )
         self.presets = build_presets(self.hw)
         self.worlds = list(iter_worlds())
-        self.world_names_by_id = {world.id: world.display_name for world in self.worlds}
-        self.world_ids_by_name = {world.display_name: world.id for world in self.worlds}
+        self.world_names_by_id = {world.id: launcher_world_label(world) for world in self.worlds}
+        self.world_ids_by_name = {launcher_world_label(world): world.id for world in self.worlds}
         self.python_command = select_python_command()
         self.selected_world_id = tk.StringVar(value=DEFAULT_WORLD_ID)
         self.selected_world_name = tk.StringVar(value=self.world_names_by_id[DEFAULT_WORLD_ID])
@@ -57,6 +63,7 @@ class GarageLifeLauncher:
         self.process: Optional[subprocess.Popen[str]] = None
         self.log_path: Optional[Path] = None
         self.preview_tick = 0
+        self.preview_after_id: Optional[str] = None
 
         self.fields: dict[str, tk.StringVar] = {}
         self.command_var = tk.StringVar()
@@ -68,7 +75,6 @@ class GarageLifeLauncher:
         self._configure_style()
         self._build_layout()
         self._load_selected_preset()
-        self._draw_preview()
         self._poll_process()
 
     def _apply_window_chrome(self) -> None:
@@ -144,7 +150,7 @@ class GarageLifeLauncher:
         self.world_combo = ttk.Combobox(
             world_panel,
             textvariable=self.selected_world_name,
-            values=[world.display_name for world in self.worlds],
+            values=[self.world_names_by_id[world.id] for world in self.worlds],
             state="readonly",
             font=("Segoe UI", 11),
         )
@@ -351,7 +357,7 @@ class GarageLifeLauncher:
         world_name = self.selected_world_name.get()
         self.selected_world_id.set(self.world_ids_by_name.get(world_name, DEFAULT_WORLD_ID))
         self._refresh_command()
-        self._draw_preview()
+        self._request_preview_draw()
 
     def _load_selected_preset(self) -> None:
         preset = self._selected_base_preset()
@@ -359,7 +365,7 @@ class GarageLifeLauncher:
             if key in self.fields:
                 self.fields[key].set(str(value))
         self._refresh_command()
-        self._draw_preview()
+        self._request_preview_draw()
 
     def _toggle_advanced(self) -> None:
         if self.advanced_open.get():
@@ -370,7 +376,7 @@ class GarageLifeLauncher:
 
     def _advanced_changed(self, *_: object) -> None:
         self._refresh_command()
-        self._draw_preview()
+        self._request_preview_draw()
 
     def _current_preset(self) -> LaunchPreset:
         preset = self._selected_base_preset()
@@ -416,12 +422,22 @@ class GarageLifeLauncher:
         self.command_box.insert("1.0", command_preview)
         self.command_box.configure(state="disabled")
 
+    def _request_preview_draw(self, delay_ms: int = 0) -> None:
+        if self.preview_after_id is not None:
+            try:
+                self.root.after_cancel(self.preview_after_id)
+            except tk.TclError:
+                pass
+            self.preview_after_id = None
+        self.preview_after_id = self.root.after(delay_ms, self._draw_preview)
+
     def _draw_preview(self) -> None:
+        self.preview_after_id = None
         self.preview.delete("all")
         width = max(1, self.preview.winfo_width())
         height = max(1, self.preview.winfo_height())
         if width < 10 or height < 10:
-            self.root.after(50, self._draw_preview)
+            self._request_preview_draw(50)
             return
         preset = self._current_preset()
         world = self._selected_world()
@@ -473,7 +489,7 @@ class GarageLifeLauncher:
             font=("Cascadia Mono", 10, "bold"),
             text=f"GPU HOLD {preset.max_gpu_temp:.0f}C  CPU HOLD {preset.max_cpu_temp:.0f}C",
         )
-        self.root.after(900, self._draw_preview)
+        self.preview_after_id = self.root.after(900, self._draw_preview)
 
     def start_show(self) -> None:
         if self.process is not None and self.process.poll() is None:
