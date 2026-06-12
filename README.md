@@ -3,7 +3,7 @@
 Garage Life Lab is a long-run selectable-world show for a large garage display. It keeps the machine hot with a full-screen GPU simulation plus optional CPU burners, while the launcher separates the world you want to see from how hard the PC should work.
 
 ## Highlights
-- Selectable worlds: Minecraft Long Term, Minecraft, Living Sketchbook, Sketchbook Visualizer, Sketchbook Ink Islands, Audio Reactive 3D, Sahara Sandstorm, Tsunami Land, Muddy Asteroid Planet, Neural Plane, Original 3D, Original Tuned 3D, and Original 2D.
+- Selectable worlds include the default Minecraft Long Term world, the Minecraft Perfect Ecosystem candidate, Living Sketchbook, sketchbook/ink scenes, audio-reactive and atmospheric 3D worlds, and legacy original shaders.
 - 3D raymarched worlds and a legacy 2D tile world designed to stay readable from across a garage.
 - In-frame show HUD with resolution, tile grid, worker load, FPS, uptime, temperature limits, and thermal hold state.
 - Full-screen GPU workload retained for sustained heat.
@@ -27,12 +27,14 @@ Normal users should launch the Windows app UI, not PowerShell flags:
 ```
 
 The first screen detects the PC, lets you choose a world, recommends a PC load preset, shows a preview thumbnail, and displays the exact launch command before anything starts.
+If an older bundled build exists under `dist`, the start script falls back to the source launcher when the bundled world registry is stale.
 
 ## Worlds
 
 World selection is separate from PC load:
 
 - **Minecraft Long Term**: the default flagship Minecraft collaboration world with block-quantized terrain, bounded rivers/oceans, villages, caves, ores, torches, weather, reflective water, soft shadows, and live camera controls.
+- **Minecraft Perfect Ecosystem** (`minecraft-perfect-ecosystem-3d`, candidate): a heavier living Minecraft ecosystem with terrain-aware water, vegetation recovery, settlement/fire/ore light cues, bounded reflections, and GPU stress tuning. See `docs\minecraft_candidate_validation.md`.
 - **Minecraft**: the original blocky 3D Overworld-style scene with stepped terrain, water, trees, small huts, glowing ores, square clouds, and live camera controls.
 - **Living Sketchbook**: hand-drawn volumetric ink world with paper grain, sun-horizon washes, and generated audio FFT/wave input.
 - **Sketchbook Visualizer**: sparse island sketchbook scene with graphite hatching, watercolor ocean washes, and audio-reactive sun strokes.
@@ -45,6 +47,8 @@ World selection is separate from PC load:
 - **Original 3D**: legacy 3D raymarched bio-world.
 - **Original Tuned 3D**: tuned legacy bio-world.
 - **Original 2D**: legacy tile-world shader.
+
+Default decision: `minecraft-long-term-3d` remains the launcher default because it is the stable public show world. `minecraft-perfect-ecosystem-3d` has focused low-smoke and bounded heavier local evidence, but stays marked as a candidate until current full comparison evidence and a candidate-specific preview asset are captured.
 
 List world IDs from the command line:
 
@@ -125,6 +129,16 @@ Run every registered world at low settings and fail on startup, shader, or compi
 ```powershell
 .\scripts\smoke_worlds.ps1
 ```
+
+For candidate-world comparison, the smoke script can filter worlds and write a notes-ready report:
+
+```powershell
+.\scripts\smoke_worlds.ps1 -MinecraftOnly -KeepGoing -TimeoutSeconds 20 -ReportPath logs\validation\minecraft-candidates-smoke.md
+.\scripts\smoke_worlds.ps1 -MinecraftOnly -KeepGoing -DryRun -ReportPath logs\validation\minecraft-candidates-command-manifest.md
+.\.venv\Scripts\python.exe scripts\list_world_metadata.py --minecraft-only --format markdown
+```
+
+See `docs\minecraft_candidate_validation.md` for repeatable Minecraft candidate validation commands, visual notes, and display recovery steps.
 
 ## Thermal Hold
 - Default limits are `CPU 75C` and `GPU 70C`.
