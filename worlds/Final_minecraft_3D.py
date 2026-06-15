@@ -622,7 +622,7 @@ SPEC = WorldSpec(
         "substeps": 24,             # Keep the sim hot and active
         "exposure": 1.35,
     },
-    stability_notes=("extreme GPU thermal load", "raytraced SSR reflections", "3D voxel noise carving"),
+    stability_notes=(),
     hud_subtitle="AMPLIFIED VOLUMETRIC STRESS",
     preview_palette=("#ff3c00", "#ff8800", "#111215", "#242730", "#0bd7e8", "#6a1be2", "#a6ff00"),
 )

@@ -636,8 +636,8 @@ SPEC = WorldSpec(
     display_shader=DISPLAY_FRAG_SHADER,
     seed_field=seed_field,
     default_overrides={},
-    preview_image='assets/world_previews/static-sandstorm-3d.png',
-    stability_notes=('heavy raymarch', 'safe'),
+    preview_image=None,
+    stability_notes=(),
     hud_subtitle='SAHARA SANDSTORM',
     preview_palette=('#140d06', '#38220b', '#6c4215', '#b7792d', '#e3b75e', '#f4df9a', '#ffffff'),
 )

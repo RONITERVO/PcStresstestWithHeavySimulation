@@ -628,8 +628,8 @@ SPEC = WorldSpec(
         "tile_size": 12,
         "substeps": 12,
     },
-    preview_image='assets/world_previews/minecraft-long-term-3d.png',
-    stability_notes=('dynamic terrain', 'cinematic lighting', 'voxel AO', 'day/night cycle'),
+    preview_image=None,
+    stability_notes=(),
     hud_subtitle='LIVING VOXEL SIMULATION',
     preview_palette=('#0a1b2a', '#103842', '#2a6a3b', '#6b4e2a', '#666b68', '#f2e3a1', '#ff5a3a'),
 )

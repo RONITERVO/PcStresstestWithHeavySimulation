@@ -455,8 +455,8 @@ SPEC = WorldSpec(
     display_shader=DISPLAY_FRAG_SHADER,
     seed_field=seed_field,
     default_overrides={'feed': 0.029, 'kill': 0.057, 'substeps': 12},
-    preview_image='assets/world_previews/original-2d.png',
-    stability_notes=('safe', 'legacy tile shader'),
+    preview_image=None,
+    stability_notes=(),
     hud_subtitle='TILE WORLD STRESS',
     preview_palette=('#06101f', '#0b3143', '#106569', '#1db38b', '#80e0b5', '#ff7ba5', '#ffe083'),
 )

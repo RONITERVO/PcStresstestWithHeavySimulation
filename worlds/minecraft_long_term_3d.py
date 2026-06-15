@@ -722,8 +722,8 @@ SPEC = WorldSpec(
         "camera_speed": 0.82,
         "tile_size": 10,
     },
-    preview_image="assets/world_previews/minecraft-long-term-3d.png",
-    stability_notes=("new default", "long-term", "blocky 3D"),
+    preview_image=None,
+    stability_notes=(),
     hud_subtitle="MINECRAFT LONG TERM",
     preview_palette=("#5bb8ff", "#92d85f", "#3f8c2d", "#8a612c", "#59615d", "#e3d187", "#ffbb45"),
 )

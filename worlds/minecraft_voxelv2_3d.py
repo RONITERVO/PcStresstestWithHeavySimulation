@@ -661,8 +661,8 @@ SPEC = WorldSpec(
         "tile_size": 8,
         "substeps": 10,
     },
-    preview_image='assets/world_previews/minecraft-long-term-3d.png',
-    stability_notes=('extreme hardware stress', '16x16 procedural textures', 'cellular automata wildfires', 'true voxel lighting'),
+    preview_image=None,
+    stability_notes=(),
     hud_subtitle='ULTIMATE VOXEL STRESS TEST',
     preview_palette=('#1E3D59', '#397A2B', '#4D3622', '#696969', '#E88C15', '#F5E6CC', '#D9381E'),
 )

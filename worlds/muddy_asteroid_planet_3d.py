@@ -529,8 +529,8 @@ SPEC = WorldSpec(
     display_shader=DISPLAY_FRAG_SHADER,
     seed_field=seed_field,
     default_overrides={},
-    preview_image='assets/world_previews/muddy-asteroid-planet-3d.png',
-    stability_notes=('heavy raymarch', 'experimental'),
+    preview_image=None,
+    stability_notes=(),
     hud_subtitle='MUDDY ASTEROID PLANET',
     preview_palette=('#070807', '#1e1c16', '#41382b', '#6b5a43', '#90806a', '#b7c2a6', '#d7eef2'),
 )

@@ -569,8 +569,8 @@ SPEC = WorldSpec(
         "contour_contrast": 1.05,
         "camera_speed": 0.9,
     },
-    preview_image="assets/world_previews/minecraft-3d.png",
-    stability_notes=("blocky 3D default", "safe"),
+    preview_image=None,
+    stability_notes=(),
     hud_subtitle="MINECRAFT OVERWORLD",
     preview_palette=("#5fb8ff", "#74d36b", "#3f8b25", "#7a522c", "#575b58", "#e5d081", "#ffb23a"),
 )

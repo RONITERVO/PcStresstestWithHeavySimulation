@@ -1,4 +1,4 @@
-"""World definition for Minecraft Fluid Dynamics."""
+﻿"""World definition for Minecraft Fluid Dynamics."""
 from __future__ import annotations
 
 import numpy as np
@@ -542,7 +542,7 @@ SPEC = WorldSpec(
         "camera_speed": 0.85,
         "tile_size": 12,
     },
-    stability_notes=("volumetric fluid", "heavy advection", "blocky 3D"),
+    stability_notes=(),
     hud_subtitle="MINECRAFT FLUID DYNAMICS",
     preview_palette=("#0c0f12", "#1d2b38", "#0f5e55", "#2fa86d", "#1a75ff", "#e03870", "#ffaa1d"),
 )

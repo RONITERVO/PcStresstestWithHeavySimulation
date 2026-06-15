@@ -407,8 +407,8 @@ SPEC = WorldSpec(
     display_shader=DISPLAY_FRAG_SHADER,
     seed_field=seed_field,
     default_overrides={'exposure': 1.5, 'ray_steps': 120, 'fx_intensity': 1.2, 'tile_size': 10},
-    preview_image='assets/world_previews/neural-plane-3d.png',
-    stability_notes=('heavy raymarch', 'experimental'),
+    preview_image=None,
+    stability_notes=(),
     hud_subtitle='NEURAL PLANE',
     preview_palette=('#050712', '#121635', '#24236a', '#4b35ad', '#1fd3c0', '#b6fff2', '#ff4fd8'),
 )
