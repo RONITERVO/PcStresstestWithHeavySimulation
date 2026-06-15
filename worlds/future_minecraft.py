@@ -1,4 +1,4 @@
-"""World definition for Minecraft Voxel Stress."""
+﻿"""World definition for Minecraft Voxel Stress."""
 from __future__ import annotations
 
 import numpy as np
@@ -543,8 +543,8 @@ SPEC = WorldSpec(
         'exposure': 1.3,      # Tuned for rich colors
         'contour_contrast': 0.85,
     },
-    preview_image='assets/world_previews/minecraft-long-term-3d.png',
-    stability_notes=('extreme gpu load', 'branchless dda', 'voxel gi'),
+    preview_image=None,
+    stability_notes=(),
     hud_subtitle='VOXEL ENGINE STRESS TEST',
     preview_palette=('#1c1c1c', '#3b2513', '#4ba34b', '#24529c', '#d7d09e', '#fc6203', '#ffffff'),
     uses_audio=True,

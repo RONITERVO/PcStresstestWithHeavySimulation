@@ -399,8 +399,8 @@ SPEC = WorldSpec(
     display_shader=DISPLAY_FRAG_SHADER,
     seed_field=seed_field,
     default_overrides={},
-    preview_image='assets/world_previews/original-3d.png',
-    stability_notes=('safe', 'legacy raymarch'),
+    preview_image=None,
+    stability_notes=(),
     hud_subtitle='3D VOLUMETRIC STRESS',
     preview_palette=('#031316', '#0a2a30', '#176a58', '#51bd72', '#bddf8b', '#ffc35d', '#f66f5e'),
 )

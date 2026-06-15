@@ -1,4 +1,4 @@
-"""Flagship Minecraft-like living ecosystem candidate world.
+"""Minecraft-like living ecosystem world.
 
 State texture contract:
 - R: moisture, drainage pressure, river/lake/ocean energy.
@@ -1102,7 +1102,7 @@ SPEC = WorldSpec(
         "exposure": 1.28,
         "gamma": 1.16,
     },
-    stability_notes=("candidate", "living ecosystem", "GPU stress", "blocky 3D"),
+    stability_notes=(),
     hud_subtitle="MINECRAFT PERFECT ECOSYSTEM",
     preview_palette=("#5bb8ff", "#83c45d", "#2e7a31", "#c1a24d", "#6b6f6a", "#42d8c7", "#ff6a26"),
 )

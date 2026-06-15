@@ -557,8 +557,8 @@ SPEC = WorldSpec(
     display_shader=DISPLAY_FRAG_SHADER,
     seed_field=seed_field,
     default_overrides={},
-    preview_image='assets/world_previews/tsunami-land-3d.png',
-    stability_notes=('heavy raymarch', 'experimental'),
+    preview_image=None,
+    stability_notes=(),
     hud_subtitle='TSUNAMI LAND',
     preview_palette=('#03131b', '#07324a', '#0a6680', '#28a3a3', '#92d3af', '#f4d97a', '#ffffff'),
 )
